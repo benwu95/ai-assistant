@@ -15,36 +15,36 @@ system.md        Global system prompt
 
 ## Setup
 
-Clone the repo and symlink into each agent CLI's config directory.
+Clone the repo and create a CLI-independent symlink. All agents/skills reference `~/.ai-assistant/shared/`, and each CLI's config symlinks also point through `~/.ai-assistant/` — so moving the repo only requires updating one symlink.
 
 ```bash
 git clone git@github.com:benwu95/ai-assistant.git ~/workspace/ai-assistant
+ln -s ~/workspace/ai-assistant ~/.ai-assistant
 ```
 
 ### Claude Code
 
 ```bash
-ln -s ~/workspace/ai-assistant/system.md  ~/.claude/CLAUDE.md
-ln -s ~/workspace/ai-assistant/agents     ~/.claude/agents
-ln -s ~/workspace/ai-assistant/commands   ~/.claude/commands
-ln -s ~/workspace/ai-assistant/scripts    ~/.claude/scripts
-ln -s ~/workspace/ai-assistant/shared     ~/.claude/shared
-ln -s ~/workspace/ai-assistant/skills     ~/.claude/skills
+ln -s ~/.ai-assistant/system.md  ~/.claude/CLAUDE.md
+ln -s ~/.ai-assistant/agents     ~/.claude/agents
+ln -s ~/.ai-assistant/commands   ~/.claude/commands
+ln -s ~/.ai-assistant/scripts    ~/.claude/scripts
+ln -s ~/.ai-assistant/skills     ~/.claude/skills
 ```
 
 ### Gemini CLI
 
 ```bash
 # System prompt (add to shell profile)
-export GEMINI_SYSTEM_MD=~/workspace/ai-assistant/system.md
+export GEMINI_SYSTEM_MD=~/.ai-assistant/system.md
 
-ln -s ~/workspace/ai-assistant/agents     ~/.gemini/agents
-ln -s ~/workspace/ai-assistant/skills     ~/.gemini/skills
+ln -s ~/.ai-assistant/agents     ~/.gemini/agents
+ln -s ~/.ai-assistant/skills     ~/.gemini/skills
 ```
 
 ### Codex CLI
 
 ```bash
-ln -s ~/workspace/ai-assistant/system.md  ~/.codex/AGENTS.md
-ln -s ~/workspace/ai-assistant/skills     ~/.agents/skills
+ln -s ~/.ai-assistant/system.md  ~/.codex/AGENTS.md
+ln -s ~/.ai-assistant/skills     ~/.agents/skills
 ```

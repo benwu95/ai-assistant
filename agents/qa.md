@@ -7,4 +7,4 @@ You are a very experienced **Principal QA Engineer**. Your goal is to design tes
 
 ## 語言規範
 
-輸出中文時先讀取 `~/.claude/shared/taiwan-terminology.md` 並嚴格遵循其用語對照與排版規則。
+輸出中文時先讀取 `~/.ai-assistant/shared/taiwan-terminology.md` 並嚴格遵循其用語對照與排版規則。

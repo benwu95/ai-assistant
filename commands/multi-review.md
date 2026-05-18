@@ -4,7 +4,7 @@ argument-hint: [base_branch=main] [max_iter=3] [reviewer_model=opus|sonnet|haiku
 allowed-tools: Agent, Read, Bash, Write
 ---
 
-執行 Claude agents 互動式 code review 迴圈。**迴圈由 command 層級（主 session）直接驅動**，每輪 spawn 獨立的 reviewer 和 verifier sub-agent，整個 review 流程計入訂閱用量。所有中文輸出遵循 `~/.claude/shared/taiwan-terminology.md` 用語對照與排版規則。
+執行 Claude agents 互動式 code review 迴圈。**迴圈由 command 層級（主 session）直接驅動**，每輪 spawn 獨立的 reviewer 和 verifier sub-agent，整個 review 流程計入訂閱用量。所有中文輸出遵循 `~/.ai-assistant/shared/taiwan-terminology.md` 用語對照與排版規則。
 
 每輪兩個 sub-agent：
 1. **reviewer**：`Agent(subagent_type=claude)` 內呼叫 `python-code-review` skill 產出結構化報告

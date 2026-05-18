@@ -217,7 +217,7 @@ done < /tmp/pr-{prNumber}-resolve-final.tsv
 
 **字數**：每條 body 控制在 ~150 字內（不含 code block）。code block 抓重點，不貼整段 diff。
 
-**語言**（遵循 `~/.claude/shared/taiwan-terminology.md` 用語對照與排版規則）：
+**語言**（遵循 `~/.ai-assistant/shared/taiwan-terminology.md` 用語對照與排版規則）：
 
 - 繁體中文 + 台灣用語
 - 專業術語保留英文：lock / race / commit / SQS / DB session / identity map / atomic UPDATE / context manager / closure / generator 等
@@ -298,7 +298,7 @@ gh api repos/{owner}/{repo}/pulls/{prNumber}/comments --paginate \
 
 ## Taiwan 用語對照（必須遵循）
 
-遵循 `~/.claude/shared/taiwan-terminology.md` 用語對照與排版規則。
+遵循 `~/.ai-assistant/shared/taiwan-terminology.md` 用語對照與排版規則。
 
 ---
 

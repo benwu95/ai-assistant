@@ -67,7 +67,7 @@ allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 
 ## Output Template
 
-輸出語言為**繁體中文台灣用語**，專業術語保留英文。用語對照與排版規則遵循 `~/.claude/shared/taiwan-terminology.md`。嚴格遵循以下結構與語氣。
+輸出語言為**繁體中文台灣用語**，專業術語保留英文。用語對照與排版規則遵循 `~/.ai-assistant/shared/taiwan-terminology.md`。嚴格遵循以下結構與語氣。
 
 **重要**：除「改動內容」與「設計重點總結」必寫外，其餘編號章節（領域模型、新 API 端點、Service 層、跨模組整合、驗證與常數、資料庫遷移、AI Knowledge、測試涵蓋等）皆為**條件式章節**——僅當該分支實際有對應變更時才產出，無變更則整章（含標題）省略，不留空殼。例如：未新增或修改任何 model 時，不應出現「## 領域模型」章節。章節編號依實際保留的章節重新排序。
 
