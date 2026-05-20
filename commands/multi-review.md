@@ -92,6 +92,74 @@ echo "PRIOR_N=$PRIOR_N"
 
 若 `FINAL_REPORT` 不存在，設 `PRIOR_N=0`，跳過此步驟直接進入 Step 4。
 
+### Step 3c: Pre-validate carry-forward `[需修正]` items [Agent + Write + Bash, conditional]
+
+**只在 `PRIOR_N > 0` 時執行。** 在進入 reviewer 迴圈前，先驗證 carry-forward 的 `[需修正]` 項目是否仍存在於當前程式碼中。已修正的項目標記為 `[已修正]`，避免 reviewer 浪費整輪重複報告已解決的問題。
+
+1. **Spawn verifier**：
+
+```
+Agent({
+  subagent_type: "multi-review-verifier",
+  description: "carry-forward recheck",
+  model: <VERIFIER_MODEL if provided, else omit>,
+  prompt: "Re-verify only the [需修正] issues from the carry-forward report against the current code in <REPO_ROOT>.
+
+Review report path: <WORKDIR>/iter-0-verified.md
+
+IMPORTANT: Only verify issues currently annotated as [需修正]. Skip [可忽略] and [不存在] items entirely — do NOT emit verdicts for them.
+
+Use these verdicts:
+- [已修正] — the issue existed in a prior review but has been fixed in the current code.
+- [需修正] — the issue still exists and needs attention.
+- [可忽略] — on re-examination, the issue is acceptable.
+Do NOT use [不存在] — all items being rechecked were previously validated as real issues.
+
+Your response back to me IS the verdicts list — do NOT preface with meta-commentary, do NOT echo reviewer fields, do NOT write any file.
+First line of your response MUST be [已修正], [需修正], or [可忽略] (each verdict marker at column 1).
+Format per issue: exactly three lines (verdict / Location: <path:line> / Evidence: <…>), records separated by a single blank line.
+End your response with the ## Verification Summary table."
+})
+```
+
+2. **Save verifier output** [Write]：寫入 `<WORKDIR>/iter-0-recheck-verdicts.md`
+
+3. **Process** [Bash]：
+
+```bash
+set -euo pipefail
+TOOLS=~/.claude/scripts/multi-review-tools.py
+WORKDIR="<WORKDIR>"
+ORIG_PRIOR_N=<PRIOR_N>
+V_RAW="$WORKDIR/iter-0-recheck-verdicts.md"
+RECHECK_ANN="$WORKDIR/iter-0-recheck-annotations.tsv"
+ANN_TSV="$WORKDIR/iter-0-annotations.tsv"
+TSV="$WORKDIR/iter-0-verdicts.tsv"
+SIG="$WORKDIR/iter-0-needsfix.sig"
+
+python3 $TOOLS parse-verifier-raw "$V_RAW" > "$RECHECK_ANN"
+RECHECK_COUNT=$(wc -l < "$RECHECK_ANN" | tr -d ' ')
+
+if (( RECHECK_COUNT > 0 )); then
+  # Merge: drop old [需修正] rows, replace with recheck results
+  awk -F'\t' '$2 !~ /需修正/' "$ANN_TSV" > "$WORKDIR/iter-0-ann-keep.tsv" || true
+  cat "$WORKDIR/iter-0-ann-keep.tsv" "$RECHECK_ANN" > "$WORKDIR/iter-0-ann-merged.tsv"
+  mv "$WORKDIR/iter-0-ann-merged.tsv" "$ANN_TSV"
+  rm -f "$WORKDIR/iter-0-ann-keep.tsv"
+  python3 $TOOLS derive-sidecars "$ANN_TSV" "$TSV" "$SIG"
+  # Update iter-0-verified.md inline so merge picks up [已修正] verdicts
+  python3 $TOOLS reannotate "$WORKDIR/iter-0-verified.md" "$ANN_TSV" --in-place
+fi
+
+PRIOR_N=$(wc -l < "$SIG" | tr -d ' ')
+RESOLVED=$((ORIG_PRIOR_N - PRIOR_N))
+echo "ORIG_PRIOR_N=$ORIG_PRIOR_N RESOLVED=$RESOLVED PRIOR_N=$PRIOR_N"
+```
+
+告知使用者：`Carry-forward recheck: <RESOLVED> of <ORIG_PRIOR_N> previously [需修正] items already resolved; <PRIOR_N> remain.`
+
+若 recheck verifier 回傳 0 筆（格式問題或 agent 失敗），跳過 merge，保留原始 carry-forward 繼續進入迴圈。
+
 ---
 
 ### Step 4: Spawn reviewer [Agent] — Round `i`（初始 `i=1`）
@@ -101,16 +169,24 @@ echo "PRIOR_N=$PRIOR_N"
 - `PREV_V` = `<WORKDIR>/iter-<i-1>-verified.md`
 
 組裝 carry-forward hint：
-- Round 2+ 且 PREV_V 存在：
+- PREV_V 存在：
 
   ```
   Previous verified report: <PREV_V>.
   Skip any issue already marked [不存在] there (reviewer hallucinations).
+  Skip any issue already marked [已修正] there (confirmed fixed in current code).
   Skip any issue already marked [可忽略] (acknowledged but acceptable).
   For items still [需修正], you MAY re-report them if you have new evidence; otherwise omit.
   ```
 
-- Round 1 或 PREV_V 不存在：`No previous iteration.`
+- Round 1 且 Step 3c recheck 已執行：在上述 hint 末尾追加：
+
+  ```
+  CARRY-FORWARD RECHECK: <WORKDIR>/iter-0-recheck-verdicts.md contains fresh re-verification of all previously [需修正] items against the current code.
+  Read it first. Items marked [已修正] have been fixed — do NOT re-report them.
+  ```
+
+- PREV_V 不存在：`No previous iteration.`
 
 呼叫 Agent：
 

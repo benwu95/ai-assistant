@@ -29,6 +29,8 @@ from pathlib import Path
 # === Shared constants =======================================================
 
 VERDICTS = ("需修正", "可忽略", "不存在")
+VERDICT_FIXED = "已修正"
+ALL_VERDICTS = (*VERDICTS, VERDICT_FIXED)
 
 ISSUE_SECTIONS = (
     "Critical Issues",
@@ -53,7 +55,7 @@ SECTION_RE = re.compile(r'^## (.+?)\s*$')
 BULLET_RE = re.compile(r'^(?:- \*\*|### )')
 # Location: bold (canonical) or plain (drift), with or without surrounding backticks
 LOCATION_RE = re.compile(r'(?:\*\*Location\*\*:|^Location:)\s*`?([A-Za-z0-9_./\-]+:\d+)')
-VERDICT_RE = re.compile(r'^\[(' + '|'.join(VERDICTS) + r')\]\s*$')
+VERDICT_RE = re.compile(r'^\[(' + '|'.join(ALL_VERDICTS) + r')\]\s*$')
 EVIDENCE_RE = re.compile(r'^Evidence:')
 TITLE_BULLET_RE = re.compile(r'^(- \*\*[^*]+\*\*)(.*)$')
 TITLE_H3_RE = re.compile(r'^### .+$')
@@ -324,7 +326,7 @@ class MergeState:
                 out.extend(body)
                 out.append("")
 
-        final_counts = dict.fromkeys(VERDICTS, 0)
+        final_counts = dict.fromkeys(ALL_VERDICTS, 0)
         for entries in self.issues_by_section.values():
             for entry in entries:
                 v = entry.get('verdict')
@@ -338,7 +340,8 @@ class MergeState:
         out.append("")
         out.append("| 結論   | 數量 |")
         out.append("| ------ | ---- |")
-        for v in VERDICTS:
+        show_verdicts = ALL_VERDICTS if final_counts.get(VERDICT_FIXED, 0) > 0 else VERDICTS
+        for v in show_verdicts:
             out.append(f"| {v} | {final_counts[v]} |")
 
         # Skip iter-0 (carry-forward anchor) — stats.tsv only covers current-run
@@ -546,6 +549,46 @@ def cmd_verification_summary(args):
         print(f"| {v}   | {counts[v]}    |")
 
 
+def cmd_reannotate(args):
+    """Update inline [verdict]+Evidence in a verified.md from an annotations TSV.
+
+    Walks every issue block in the file. If the block's Location key exists in
+    the TSV with a different verdict, the block's [verdict] and Evidence lines
+    are replaced in-place. Writes result to stdout (or overwrites in-place when
+    --in-place is set).
+    """
+    ann = {}
+    ann_path = Path(args.ann_tsv)
+    if ann_path.exists():
+        for line in ann_path.read_text().splitlines():
+            cols = line.split('\t', 2)
+            if len(cols) >= 3:
+                ann[cols[0]] = (cols[1], cols[2])
+
+    preamble, order, sections = parse_file(args.path)
+    out = list(preamble)
+
+    for section_name in order:
+        out.append(f"## {section_name}")
+        body = sections[section_name]
+        if section_name in ISSUE_SECTIONS:
+            for kind, block in split_blocks(body):
+                if kind == 'issue':
+                    loc = extract_location(block)
+                    if loc and loc in ann:
+                        verdict, evidence = ann[loc]
+                        block = splice_verdict_in_block(block, verdict, evidence)
+                out.extend(block)
+        else:
+            out.extend(body)
+
+    text = '\n'.join(out) + '\n'
+    if args.in_place:
+        Path(args.path).write_text(text)
+    else:
+        sys.stdout.write(text)
+
+
 def cmd_derive_sidecars(args):
     """3-col ann.tsv → 2-col verdicts.tsv (loc, verdict) + needs-fix sig (loc only)."""
     seen = read_tsv_2col(args.ann_tsv)
@@ -672,6 +715,12 @@ def main():
     p.add_argument('v_raw')
     p.add_argument('ann_tsv')
     p.set_defaults(func=cmd_verification_summary)
+
+    p = sub.add_parser('reannotate')
+    p.add_argument('path')
+    p.add_argument('ann_tsv')
+    p.add_argument('--in-place', action='store_true')
+    p.set_defaults(func=cmd_reannotate)
 
     p = sub.add_parser('derive-sidecars')
     p.add_argument('ann_tsv')
