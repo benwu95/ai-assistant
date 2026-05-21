@@ -13,6 +13,21 @@ skills/          Skill definitions (branch-diff, python-code-review, sqlalchemy-
 system.md        Global system prompt
 ```
 
+## Generated Artifacts
+
+All files produced by skills, commands, and the system workflow are stored under the **`.tasks/{currentBranch}/`** directory of the target repository (resolved per current git branch). This keeps generated artifacts colocated with the branch they describe and isolated from source code.
+
+| Producer | Type | Output Path |
+|---|---|---|
+| `branch-diff` | skill | `.tasks/{currentBranch}/branch-diff.md` |
+| `python-code-review` | skill | `.tasks/{currentBranch}/review.md` |
+| `sqlalchemy-with-postgresql` | skill | _(knowledge-only, no file output)_ |
+| `multi-review` | command | `.tasks/{currentBranch}/review.md` + `.tasks/{currentBranch}/review/{timestamp}/` |
+| `review-to-pr` | command | reads `.tasks/{currentBranch}/review-merged.md` / `review.md` |
+| `system.md` | workflow | `.tasks/{currentBranch}/todo.md`, `.tasks/{currentBranch}/lessons.md` |
+
+When adding a new skill or command that writes files, follow the same convention: resolve `currentBranch` via `git rev-parse --abbrev-ref HEAD` and write to `.tasks/{currentBranch}/<artifact>.md`.
+
 ## Setup
 
 Clone the repo and create a CLI-independent symlink. All agents/skills reference `~/.ai-assistant/shared/`, and each CLI's config symlinks also point through `~/.ai-assistant/` — so moving the repo only requires updating one symlink.
