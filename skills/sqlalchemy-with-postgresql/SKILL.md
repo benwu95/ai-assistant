@@ -25,6 +25,7 @@ Prioritize evaluation in this order:
 - **NEVER** use `lazy="subquery"` or `lazy="dynamic"`; these are deprecated or inefficient in 2.0. Use `selectinload` or `WriteOnlyMapped`.
 - **NEVER** assume relationship attributes are updated automatically if the entity already exists in the Session without `populate_existing=True`.
 - **NEVER** perform blocking I/O (like `requests` or `time.sleep`) inside an async repository method.
+- **NEVER** share a single `AsyncSession` across concurrent tasks (`asyncio.gather`, `TaskGroup`, `asyncio.create_task`). `AsyncSession` is **not task-safe** — its underlying connection serves one query at a time. Concurrent usage raises `InvalidRequestError: This session is provisioning a new connection; concurrent operations are not permitted` or `asyncpg.InterfaceError: another operation is in progress`. Either merge into a single statement (`IN (...)`), or give each task its own session from the `async_sessionmaker`.
 - **NEVER** use `session.add()` in a loop for >100 records; use `insert().values([...])` or `bulk_insert_mappings`.
 - **NEVER** use generic `JSON` type for PostgreSQL; use `sqlalchemy.dialects.postgresql.JSONB` for indexing and operator support.
 - **NEVER** pass raw strings for `UUID` or `INET` columns when using `asyncpg`; ensure proper Python object conversion (e.g., `uuid.UUID(val)`) first.
@@ -78,6 +79,38 @@ stmt = select(Product.name).where(Product.metadata_json["specs"]["color"].astext
 - Use `AsyncSession` with `asyncpg` driver.
 - Always use `await session.commit()` or `await session.flush()`.
 - Accessing an un-loaded relationship in an async context will raise `MissingGreenlet`. **NEVER** use lazy loading in async.
+- **Session is the concurrency boundary**: one `AsyncSession` = one connection = one in-flight query. Scope: **one session per task**.
+
+#### Concurrent Access Audit
+When reviewing async repository code, scan for these red flags:
+
+```python
+# ❌ ANTI-PATTERN: same session shared across gather
+r = repo(async_session)
+await asyncio.gather(*[r.get(i) for i in ids])
+
+# ❌ ANTI-PATTERN: session captured in closure, fired concurrently
+async with TaskGroup() as tg:
+    for i in ids:
+        tg.create_task(repo(async_session).get(i))
+```
+
+**Correct patterns** (in order of preference):
+
+```python
+# ✅ Best: collapse N round-trips into one
+stmt = select(Model).where(Model.id.in_(ids))
+results = (await session.execute(stmt)).scalars().all()
+
+# ✅ When parallelism is genuinely needed (heterogeneous queries, mixed I/O):
+async def _one(session_factory, i):
+    async with session_factory() as s:
+        return await repo(s).get(i)
+
+results = await asyncio.gather(*[_one(async_sessionmaker, i) for i in ids])
+```
+
+**Pool sizing check**: parallel sessions are capped by `create_async_engine(pool_size=N, max_overflow=M)`. Spawning more concurrent tasks than `N + M` will block waiting for connections — defeating the point of `gather`.
 
 ### 3. Driver-Specific Handling (asyncpg)
 - **UUIDs**: `asyncpg` does not automatically convert strings to UUIDs. Ensure `uuid.UUID(val)` is used in queries and filters.
