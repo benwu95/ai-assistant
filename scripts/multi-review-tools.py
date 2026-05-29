@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Multi-review pipeline tools — Python-side helpers for multi-review.sh.
+"""Multi-review pipeline tools — Python-side helpers for the /multi-review command.
 
 All non-trivial parsing / counting / cross-round comparison logic lives here.
-The bash driver (`multi-review.sh`) handles only:
-  - subprocess invocation of `claude -p ...`
-  - heartbeat / trap cleanup
-  - arg parsing + top-level flow
+The /multi-review command (commands/multi-review.md) drives the loop from the
+main Claude Code session and invokes these subcommands via Bash between the
+reviewer and verifier sub-agent turns.
 
 Subcommands:
   merge                 Build cumulative review.md from iter-*-verified.md
@@ -17,7 +16,6 @@ Subcommands:
   derive-sidecars       3-col ann.tsv → 2-col verdicts.tsv + needs-fix sig
   diff-rounds           Compare two rounds: NEW / RESOLVED / CARRIED / FLIPPED
   summary-table         Render per-round breakdown table from stats.tsv
-  inline-agent          Strip frontmatter from agent.md → JSON for `claude --agents`
 """
 import argparse
 import json
@@ -664,24 +662,6 @@ def cmd_summary_table(args):
         print(f"| {n:>5} | {cc:>8} | {cp:>11} | {cm:>15} | {nf:>6} | {ig:>6} | {ne:>6} | {new:>13} |")
 
 
-def cmd_inline_agent(args):
-    """Strip YAML frontmatter from agent.md, emit JSON for `claude --agents`."""
-    lines = Path(args.path).read_text().splitlines()
-    body_start = 0
-    if lines and lines[0].strip() == '---':
-        for i in range(1, len(lines)):
-            if lines[i].strip() == '---':
-                body_start = i + 1
-                break
-    body = '\n'.join(lines[body_start:]).lstrip('\n')
-    print(json.dumps({
-        args.name: {
-            "description": args.description,
-            "prompt": body,
-        }
-    }, ensure_ascii=False))
-
-
 # === CLI dispatcher =========================================================
 
 def main():
@@ -739,12 +719,6 @@ def main():
     p = sub.add_parser('summary-table')
     p.add_argument('stats_tsv')
     p.set_defaults(func=cmd_summary_table)
-
-    p = sub.add_parser('inline-agent')
-    p.add_argument('path')
-    p.add_argument('--name', required=True)
-    p.add_argument('--description', required=True)
-    p.set_defaults(func=cmd_inline_agent)
 
     args = parser.parse_args()
     args.func(args)

@@ -32,7 +32,7 @@ Steps 4-9 構成 review 迴圈。Step 9 的 bash 輸出會包含 `SIGNAL=CONVERG
 - 第 4 個位置 → `VERIFIER_MODEL`（可選，必須是 alias: opus/sonnet/haiku）
 
 若 `MAX_ITER > 5`，拒絕並告知使用者上限為 5。
-若使用者傳 full model id（如 `claude-opus-4-6[1m]`），拒絕並建議改用 alias。
+若使用者傳 full model id（如 `claude-opus-4-8`），拒絕並建議改用 alias。
 
 告知使用者本次參數，然後開始執行。
 
