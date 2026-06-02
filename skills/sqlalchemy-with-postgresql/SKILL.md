@@ -30,6 +30,7 @@ Prioritize evaluation in this order:
 - **NEVER** use generic `JSON` type for PostgreSQL; use `sqlalchemy.dialects.postgresql.JSONB` for indexing and operator support.
 - **NEVER** pass raw strings for `UUID` or `INET` columns when using `asyncpg`; ensure proper Python object conversion (e.g., `uuid.UUID(val)`) first.
 - **NEVER** access relationship attributes outside of an active session transaction in async mode.
+- **NEVER** call `create_async_engine(...)` at call sites or per-worker. Define exactly **one** `AsyncEngine` per process in a single module, so pool sizing (`pool_size`, `max_overflow`, `pool_recycle`, `pool_pre_ping`) and metrics registration live in one place. Re-creating engines elsewhere silently forks the pool tuning and metrics topology. Process isolation is automatic **only when each worker imports the module fresh (spawn)** — that process then gets its own instance; do not "manually isolate" with a second engine. **Fork caveat**: under fork-based deployment (Gunicorn `preload_app`, `multiprocessing` fork) the engine and its pooled connections are *inherited* by child processes, and asyncpg connections are bound to the parent's event loop — they break in the child. Build the engine in worker init (post-fork), or `await engine.dispose()` in a post-fork hook; never serve traffic from a pre-fork pool. Genuinely distinct targets (a read replica, Alembic's `NullPool` engine) get a *named* engine in that same module, never an inline one at the call site.
 - **NEVER** use `ForeignKey` except for many-to-many mapping tables. For columns referencing other tables (e.g. `table_id`), document the referenced table and column in the column's `doc` parameter instead.
   ```python
   # SQLAlchemy 2.0 — Correct
@@ -163,6 +164,16 @@ await raw_conn.driver_connection.copy_records_to_table(
 - **UUIDs**: `asyncpg` does not automatically convert strings to UUIDs. Ensure `uuid.UUID(val)` is used in queries and filters.
 - **JSONB Encoders**: When inserting into JSONB, ensure the data is a serializable `dict` or `list`.
 - **Null Safety**: PostgreSQL is strict about types in `CASE` or `COALESCE` statements; ensure explicit casting if necessary using `cast(val, Type)`.
+
+## Schema Migration Safety (DDL under rolling deploys)
+
+Migrations run while the **old app version is still serving traffic**. The old code and the new schema MUST coexist.
+
+1. **Online-safe & backward-compatible** — never apply a schema change the currently-running app version cannot tolerate.
+2. **Add columns the non-blocking way** — `nullable=True` or with a server default; backfill in a separate step. On PG 11+ a *constant* server default is metadata-only (no table rewrite); a *volatile* default (e.g. per-row `now()`) or adding `NOT NULL` without a default forces a full rewrite under a long-held `ACCESS EXCLUSIVE` lock on large tables — avoid those.
+3. **Build indexes with `CREATE INDEX CONCURRENTLY`** — in Alembic, run it via `op.execute(...)` and mark that migration to NOT run inside a transaction (`CONCURRENTLY` cannot run in a transaction block).
+4. **Destructive changes (drop / rename column) use expand-contract** — expand first (add new column / dual-write), switch all readers and writers, then contract (drop the old column) in a *later* release. Never drop or rename a column the old running version still reads, in the same PR.
+5. **Migrations use their own `NullPool` engine**, not the application pool (see the single-engine NEVER rule above).
 
 ## Analysis & Tooling
 
