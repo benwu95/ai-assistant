@@ -47,14 +47,12 @@ ln -s ~/.ai-assistant/scripts    ~/.claude/scripts
 ln -s ~/.ai-assistant/skills     ~/.claude/skills
 ```
 
-### Gemini CLI
+### Antigravity CLI
 
 ```bash
-# System prompt (add to shell profile)
-export GEMINI_SYSTEM_MD=~/.ai-assistant/system.md
-
-ln -s ~/.ai-assistant/agents     ~/.gemini/agents
-ln -s ~/.ai-assistant/skills     ~/.gemini/skills
+ln -s ~/.ai-assistant/system.md  ~/.gemini/GEMINI.md
+ln -s ~/.ai-assistant/agents     ~/.gemini/antigravity-cli/agents
+ln -s ~/.ai-assistant/skills     ~/.gemini/antigravity-cli/skills
 ```
 
 ### Codex CLI
