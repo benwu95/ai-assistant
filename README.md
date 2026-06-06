@@ -51,7 +51,6 @@ ln -s ~/.ai-assistant/skills     ~/.claude/skills
 
 ```bash
 ln -s ~/.ai-assistant/system.md  ~/.gemini/GEMINI.md
-ln -s ~/.ai-assistant/agents     ~/.gemini/antigravity-cli/agents
 ln -s ~/.ai-assistant/skills     ~/.gemini/antigravity-cli/skills
 ```
 
@@ -59,5 +58,12 @@ ln -s ~/.ai-assistant/skills     ~/.gemini/antigravity-cli/skills
 
 ```bash
 ln -s ~/.ai-assistant/system.md  ~/.codex/AGENTS.md
+ln -s ~/.ai-assistant/skills     ~/.agents/skills
+```
+
+### Copilot CLI
+
+```bash
+ln -s ~/.ai-assistant/system.md  ~/.copilot/copilot-instructions.md
 ln -s ~/.ai-assistant/skills     ~/.agents/skills
 ```
