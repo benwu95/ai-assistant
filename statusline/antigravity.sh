@@ -272,6 +272,13 @@ if [ -n "$cli_version" ] && [ "$cli_version" != "null" ] && [ "$cli_version" != 
   line1_segments+=("agy v${cli_version}")
 fi
 
+# 0.5. Execution Mode
+cycle_mode=$(echo "$payload" | jq -r '.cycle_mode // .agent_mode // .mode // "default"')
+if [ -z "$cycle_mode" ] || [ "$cycle_mode" = "null" ] || [ "$cycle_mode" = "" ]; then
+  cycle_mode="default"
+fi
+line1_segments+=("Mode: ${cycle_mode}")
+
 # 1. Agent State
 state_upper=$(echo "$agent_state" | tr '[:lower:]' '[:upper:]')
 case "$agent_state" in
