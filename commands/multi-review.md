@@ -14,7 +14,7 @@ allowed-tools: Agent, Read, Bash, Write
 
 ## Constant
 
-- `TOOLS` = `~/.claude/scripts/multi-review-tools.py`
+- `TOOLS` = `~/.ai-assistant/scripts/multi-review-tools.py`
 
 ## EXECUTION RULE
 
@@ -78,7 +78,7 @@ echo "FILES=$(wc -l < $WORKDIR/changed-files.txt | tr -d ' ')"
 
 ```bash
 set -euo pipefail
-TOOLS=~/.claude/scripts/multi-review-tools.py
+TOOLS=~/.ai-assistant/scripts/multi-review-tools.py
 cp "<FINAL_REPORT>" "<WORKDIR>/iter-0-verified.md"
 python3 $TOOLS extract-annotations "<WORKDIR>/iter-0-verified.md" \
   > "<WORKDIR>/iter-0-annotations.tsv"
@@ -128,7 +128,7 @@ End your response with the ## Verification Summary table."
 
 ```bash
 set -euo pipefail
-TOOLS=~/.claude/scripts/multi-review-tools.py
+TOOLS=~/.ai-assistant/scripts/multi-review-tools.py
 WORKDIR="<WORKDIR>"
 ORIG_PRIOR_N=<PRIOR_N>
 V_RAW="$WORKDIR/iter-0-recheck-verdicts.md"
@@ -217,20 +217,11 @@ OUTPUT INSTRUCTIONS (override the skill default):
 
 ### Step 5: Post-reviewer check [Bash]
 
-替換 `<R>`, `<FINAL_REPORT>`, `<WORKDIR>` 後執行：
+替換 `<R>` 後執行：
 
 ```bash
 set -euo pipefail
 R="<R>"
-FINAL_REPORT="<FINAL_REPORT>"
-WORKDIR="<WORKDIR>"
-if [[ ! -s "$R" ]] && [[ -f "$FINAL_REPORT" ]]; then
-  SETUP_MTIME=$(stat -f %m "$WORKDIR/full-diff.patch" 2>/dev/null || stat -c %Y "$WORKDIR/full-diff.patch" 2>/dev/null || echo 0)
-  FR_MTIME=$(stat -f %m "$FINAL_REPORT" 2>/dev/null || stat -c %Y "$FINAL_REPORT" 2>/dev/null || echo 0)
-  if (( FR_MTIME > SETUP_MTIME )); then
-    cp "$FINAL_REPORT" "$R"; rm -f "$FINAL_REPORT"; echo "RECOVERED from FINAL_REPORT stomp"
-  fi
-fi
 [[ -s "$R" ]] || { echo "REVIEWER_FAILED"; exit 1; }
 grep -qE '^## (Critical Issues|Performance & Optimization|Maintainability & Architecture)' "$R" || { echo "REVIEWER_BAD_FORMAT"; exit 1; }
 echo "REVIEWER_OK round <i>"
@@ -291,7 +282,7 @@ Write(file_path="<WORKDIR>/iter-<i>-verdicts.md", content=<verifier 的完整回
 
 ```bash
 set -euo pipefail
-TOOLS=~/.claude/scripts/multi-review-tools.py
+TOOLS=~/.ai-assistant/scripts/multi-review-tools.py
 R="<R>"
 V_RAW="<WORKDIR>/iter-<i>-verdicts.md"
 V="<WORKDIR>/iter-<i>-verified.md"
@@ -348,7 +339,7 @@ fi
 
 ```bash
 set -euo pipefail
-python3 ~/.claude/scripts/multi-review-tools.py merge "<WORKDIR>" "<FINAL_REPORT>" "<STATS_TSV>"
+python3 ~/.ai-assistant/scripts/multi-review-tools.py merge "<WORKDIR>" "<FINAL_REPORT>" "<STATS_TSV>"
 echo "Final report: <FINAL_REPORT>"
 ```
 
@@ -360,7 +351,7 @@ echo "Final report: <FINAL_REPORT>"
 
 ```bash
 set -euo pipefail
-python3 ~/.claude/scripts/multi-review-tools.py summary-table "<STATS_TSV>"
+python3 ~/.ai-assistant/scripts/multi-review-tools.py summary-table "<STATS_TSV>"
 ```
 
 2. **讀取最終報告** [Read]：開啟 `<FINAL_REPORT>`

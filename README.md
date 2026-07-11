@@ -10,6 +10,7 @@ commands/        Slash command definitions
 scripts/         Supporting shell/Python scripts
 shared/          Shared resources (e.g. terminology)
 skills/          Skill definitions (branch-diff, python-code-review, sqlalchemy-with-postgresql)
+statusline/      Status line scripts for CLI harnesses
 system.md        Global system prompt
 ```
 
@@ -23,7 +24,7 @@ All files produced by skills, commands, and the system workflow are stored under
 | `python-code-review` | skill | `.tasks/{currentBranch}/review.md` |
 | `sqlalchemy-with-postgresql` | skill | _(knowledge-only, no file output)_ |
 | `multi-review` | command | `.tasks/{currentBranch}/review.md` + `.tasks/{currentBranch}/review/{timestamp}/` |
-| `review-to-pr` | command | reads `.tasks/{currentBranch}/review-merged.md` / `review.md` |
+| `review-to-pr` | command | reads `.tasks/{currentBranch}/review-merged.md` / `review.md`; intermediates in `.tasks/{currentBranch}/review-to-pr/` |
 | `system.md` | workflow | `.tasks/{currentBranch}/todo.md`, `.tasks/{currentBranch}/lessons.md` |
 
 When adding a new skill or command that writes files, follow the same convention: resolve `currentBranch` via `git rev-parse --abbrev-ref HEAD` and write to `.tasks/{currentBranch}/<artifact>.md`.
@@ -65,5 +66,5 @@ ln -s ~/.ai-assistant/skills     ~/.agents/skills
 
 ```bash
 ln -s ~/.ai-assistant/system.md  ~/.copilot/copilot-instructions.md
-ln -s ~/.ai-assistant/skills     ~/.agents/skills
+ln -s ~/.ai-assistant/skills     ~/.agents/skills  # shared with Codex CLI; skip if already linked
 ```

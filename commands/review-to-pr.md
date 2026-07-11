@@ -29,6 +29,7 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(cat:*), Bash(ls:*), Bas
 - `currentBranch`：`git rev-parse --abbrev-ref HEAD`
 - `prNumber`：用 `gh pr list --head {currentBranch} --state open --json number --jq '.[0].number'` 取得；若無對應 PR → 提示後中止
 - `authUser`：`gh api user --jq .login` 取得，作為「我」的替換對象
+- `workDir`：`.tasks/{currentBranch}/review-to-pr/`，所有中間檔與 JSON payload 的存放處（`mkdir -p` 建立；沿用 `.tasks/` artifact 慣例，不用 `/tmp` 以免被系統清除）
 
 ---
 
@@ -94,7 +95,7 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(cat:*), Bash(ls:*), Bas
        --jq '.data.repository.pullRequest.reviewThreads'
    ```
    - 若 `pageInfo.hasNextPage == true` → 帶 `-F cursor={endCursor}` 續拉
-   - 結果寫成 `/tmp/pr-{prNumber}-threads.json`，後續 Phase 3 / Phase 4 都會用
+   - 結果寫成 `{workDir}/pr-{prNumber}-threads.json`，後續 Phase 3 / Phase 4 都會用
 
 > owner/repo 從 `gh repo view --json owner,name --jq '.owner.login + "/" + .name'` 拿。
 
@@ -106,14 +107,14 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(cat:*), Bash(ls:*), Bas
 
 #### Step 3.1 — 篩選候選
 
-從 Phase 2 拿到的 `/tmp/pr-{prNumber}-threads.json` 過濾：
+從 Phase 2 拿到的 `{workDir}/pr-{prNumber}-threads.json` 過濾：
 
 ```bash
 jq -r '.nodes[]
   | select(.comments.nodes[0].author.login == "{authUser}"
            and .isResolved == false)
   | "\(.id)\t\(.path)\t\(.line // .originalLine)\t\(.comments.nodes[0].pullRequestReview.databaseId)"' \
-  /tmp/pr-{prNumber}-threads.json > /tmp/pr-{prNumber}-resolve-candidates.tsv
+  {workDir}/pr-{prNumber}-threads.json > {workDir}/pr-{prNumber}-resolve-candidates.tsv
 ```
 
 每行：`thread_id`、`path`、`line`、`root_review_id`。
@@ -155,7 +156,7 @@ jq -r '.nodes[]
 
 ```bash
 while IFS=$'\t' read -r thread_id path line; do
-  /opt/homebrew/bin/gh api graphql \
+  gh api graphql \
     -f query='mutation($id: ID!) {
       resolveReviewThread(input: {threadId: $id}) {
         thread { id isResolved }
@@ -164,10 +165,10 @@ while IFS=$'\t' read -r thread_id path line; do
     --jq '.data.resolveReviewThread.thread.isResolved' \
     && echo "✓ $path:$line" \
     || echo "✗ $path:$line"
-done < /tmp/pr-{prNumber}-resolve-final.tsv
+done < {workDir}/pr-{prNumber}-resolve-final.tsv
 ```
 
-> **注意**：某些 shell 環境 `gh` 不在 `$PATH`（例如 sandboxed subshell）。若直接呼 `gh` 失敗，改用絕對路徑 `/opt/homebrew/bin/gh`（macOS Homebrew 預設）或 `which gh` 取得的路徑。
+> **注意**：某些 shell 環境 `gh` 不在 `$PATH`（例如 sandboxed subshell）。若直接呼 `gh` 失敗，先以 `command -v gh` 解析出絕對路徑再帶入指令；不要寫死安裝路徑。
 
 執行後回報：`resolved=N failed=M`，並列出失敗的 path:line（通常是 thread 被別人提前 resolve、或網路問題）。
 
@@ -252,7 +253,7 @@ done < /tmp/pr-{prNumber}-resolve-final.tsv
    - 合併某幾條 / 拆分某條
    修改完後**回到迴圈開頭**重新顯示主問題（不要自動送）。
 3. **發送至 GitHub** — 進 Phase 7。
-4. **取消** — 中止。把 JSON payload 保留在 `/tmp/review-to-pr-{prNumber}.json` 並告訴使用者路徑，方便事後手動處理。
+4. **取消** — 中止。把 JSON payload 保留在 `{workDir}/review-to-pr-{prNumber}.json` 並告訴使用者路徑，方便事後手動處理。
 
 迴圈持續直到使用者選「發送」或「取消」。**不要替使用者做決定**；即使所有 P2 都看完了，也要回到主問題等使用者明確下決定。
 
@@ -274,11 +275,11 @@ done < /tmp/pr-{prNumber}-resolve-final.tsv
 }
 ```
 
-寫到 `/tmp/review-to-pr-{prNumber}.json`，然後：
+寫到 `{workDir}/review-to-pr-{prNumber}.json`，然後：
 
 ```bash
 gh api -X POST repos/{owner}/{repo}/pulls/{prNumber}/reviews \
-  --input /tmp/review-to-pr-{prNumber}.json \
+  --input {workDir}/review-to-pr-{prNumber}.json \
   --jq '{id, state, html_url, submitted_at}'
 ```
 
@@ -315,8 +316,8 @@ gh api repos/{owner}/{repo}/pulls/{prNumber}/comments --paginate \
 - 若 `gh` 未 auth 或無權限 → 不嘗試 workaround，直接報錯誤並提示使用者 `gh auth login`。
 - 若 commit_id 在送出時已過時（PR 在我們準備期間有新 push）→ 重新抓 headRefOid 後再送；body 不變。
 - 處理大檔案 / 多筆 issue 時，所有 `gh api` 呼叫一律 `--paginate`（GraphQL 用 `pageInfo.hasNextPage` 續拉）。
-- JSON payload 用 Write tool 寫到 `/tmp/`，不要嘗試在 shell 內 echo 大量轉義字串。
-- 環境 `$PATH` 異常時（subshell 找不到 `gh`），用絕對路徑（macOS Homebrew 預設 `/opt/homebrew/bin/gh`）。
+- JSON payload 用 Write tool 寫到 `{workDir}/`，不要嘗試在 shell 內 echo 大量轉義字串。
+- 環境 `$PATH` 異常時（subshell 找不到 `gh`），用 `command -v gh` 解析出的絕對路徑，不要寫死安裝路徑。
 
 ---
 

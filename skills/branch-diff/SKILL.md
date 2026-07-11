@@ -1,6 +1,6 @@
 ---
 name: branch-diff
-description: "Generate a structured branch-diff document (繁體中文) that summarizes all changes between the current branch and a target branch (default main). Output to .tasks/{$currentBranch}/branch-diff.md. Triggers: branch diff, 分支差異, 分支變更詳解, summarize branch, diff summary, PR summary."
+description: "Generate a structured branch-diff document (繁體中文) that summarizes all changes between the current branch and a target branch (default main). Output to .tasks/{currentBranch}/branch-diff.md. Triggers: branch diff, 分支差異, 分支變更詳解, summarize branch, diff summary, PR summary."
 allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 ---
 
@@ -12,7 +12,7 @@ allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 
 - `targetBranch`（選填）：比較的基準分支；預設 `main`
 - `currentBranch`：從 `git rev-parse --abbrev-ref HEAD` 取得
-- `outputPath`：預設 `.tasks/{$currentBranch}/branch-diff.md`
+- `outputPath`：預設 `.tasks/{currentBranch}/branch-diff.md`
 
 若使用者以 `/branch-diff <branchName>` 方式呼叫，將 `<branchName>` 視為 `targetBranch`。
 
@@ -39,7 +39,7 @@ allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 
 - 新增的 model / migration / router / service 檔
 - 修改行數 > 50 的檔案
-- 任何 `prospec/ai-knowledge/` 文件
+- AI knowledge 類文件（例如 `prospec/ai-knowledge/`；實際路徑依 repo 調整）
 - 測試檔：閱讀描述即可，不需逐行
 
 若 diff 過大（> 2000 行），以 Agent（Explore subagent）分派探索，保留主 context；subagent 同樣需直接讀取磁碟上的最新檔案。
@@ -69,7 +69,7 @@ allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 
 輸出語言為**繁體中文台灣用語**，專業術語保留英文。用語對照與排版規則遵循 `~/.ai-assistant/shared/taiwan-terminology.md`。嚴格遵循以下結構與語氣。
 
-**重要**：除「改動內容」與「設計重點總結」必寫外，其餘編號章節（領域模型、新 API 端點、Service 層、跨模組整合、驗證與常數、資料庫遷移、AI Knowledge、測試涵蓋等）皆為**條件式章節**——僅當該分支實際有對應變更時才產出，無變更則整章（含標題）省略，不留空殼。例如：未新增或修改任何 model 時，不應出現「## 領域模型」章節。章節編號依實際保留的章節重新排序。
+**重要**：除「改動內容」與「設計重點總結」必寫外，其餘章節（領域模型、新 API 端點、Service 層、跨模組整合、驗證與常數、資料庫遷移、AI Knowledge、測試涵蓋等）皆為**條件式章節**——僅當該分支實際有對應變更時才產出，無變更則整章（含標題）省略，不留空殼。例如：未新增或修改任何 model 時，不應出現「## 領域模型」章節。章節一律不編號，以標題文字呈現。
 
 ````markdown
 # {currentBranch} 分支變更詳解
@@ -112,7 +112,7 @@ allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 
 ---
 
-## 領域模型（僅當有新增／修改 model 時保留此章節，否則整章省略）
+## 領域模型
 
 **{ModelName}** — {一句話說明用途}。
 
@@ -127,7 +127,7 @@ allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 
 ---
 
-## 2. 新 API 端點
+## 新 API 端點
 
 路徑：`{router_file}`
 
@@ -143,7 +143,7 @@ allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 
 ---
 
-## 3. Service 層
+## Service 層
 
 路徑：`{service_file}`（{±N} 行變更）
 
@@ -156,14 +156,14 @@ allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 
 ---
 
-## 4. 跨模組整合
+## 跨模組整合
 
 ### `{module_file}` ({±N})
 - ...
 
 ---
 
-## 5. 驗證與常數
+## 驗證與常數
 
 ### `{validation_file}`
 新增：
@@ -174,7 +174,7 @@ allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 
 ---
 
-## 6. 資料庫遷移
+## 資料庫遷移
 
 `{migration_file}`
 
@@ -186,14 +186,14 @@ allowed-tools: Read, Write, Grep, Glob, Bash(git:*)
 
 ---
 
-## 7. AI Knowledge
+## AI Knowledge
 
 `{ai_knowledge_path}` 變更：
 - ...
 
 ---
 
-## 8. 測試涵蓋
+## 測試涵蓋
 
 共 {N} 個新／修改檔：
 
