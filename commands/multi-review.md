@@ -4,13 +4,13 @@ argument-hint: [base_branch=main] [max_iter=3] [reviewer_model=opus|sonnet|haiku
 allowed-tools: Agent, Read, Bash, Write
 ---
 
-執行 Claude agents 互動式 code review 迴圈。**迴圈由 command 層級（主 session）直接驅動**，每輪 spawn 獨立的 reviewer 和 verifier sub-agent，整個 review 流程計入訂閱用量。所有中文輸出遵循 `~/.ai-assistant/shared/taiwan-terminology.md` 用語對照與排版規則。
+Run an interactive code review loop between Claude agents. **The loop is driven directly at the command level (main session)**: each round spawns an independent reviewer and verifier sub-agent, and the whole review flow counts toward subscription usage. All Chinese output follows the terminology table and typography rules in `~/.ai-assistant/shared/taiwan-terminology.md`.
 
-每輪兩個 sub-agent：
-1. **reviewer**：`Agent(subagent_type=claude)` 內呼叫 `python-code-review` skill 產出結構化報告
-2. **verifier**：`Agent(subagent_type=multi-review-verifier)` 讀程式碼逐項驗證、標註 `[需修正] / [可忽略] / [不存在]`
+Each round spawns two sub-agents:
+1. **reviewer**: `Agent(subagent_type=claude)` invokes the `python-code-review` skill to produce a structured report
+2. **verifier**: `Agent(subagent_type=multi-review-verifier)` reads the code and validates each issue, annotating `[NEEDS-FIX] / [IGNORABLE] / [NONEXISTENT]`
 
-迴圈直到本輪 `[需修正]` = 0 或達 `max_iter`，**先到先停**。
+Loop until the current round has zero `[NEEDS-FIX]` or `max_iter` is reached, **whichever comes first**.
 
 ## Constant
 
@@ -18,7 +18,7 @@ allowed-tools: Agent, Read, Bash, Write
 
 ## EXECUTION RULE
 
-Steps 4-9 構成 review 迴圈。Step 9 的 bash 輸出會包含 `SIGNAL=CONVERGED` 或 `SIGNAL=MAX_ITER_REACHED` 或 `SIGNAL=CONTINUE NEXT_ROUND=<N>`。**若 SIGNAL 為 CONTINUE，你必須立刻用 NEXT_ROUND 的值作為新的 `i`，回到 Step 4 執行下一輪。在迴圈未結束前產出 text-only response（沒有 tool call）是一個 BUG。**
+Steps 4-9 form the review loop. Step 9's bash output contains `SIGNAL=CONVERGED`, `SIGNAL=MAX_ITER_REACHED`, or `SIGNAL=CONTINUE NEXT_ROUND=<N>`. **If SIGNAL is CONTINUE, you MUST immediately take the NEXT_ROUND value as the new `i` and go back to Step 4 for the next round. Producing a text-only response (no tool call) before the loop has ended is a BUG.**
 
 ---
 
@@ -26,19 +26,19 @@ Steps 4-9 構成 review 迴圈。Step 9 的 bash 輸出會包含 `SIGNAL=CONVERG
 
 ### Step 1: Parse `$ARGUMENTS`
 
-- 第 1 個位置 → `BASE`（預設 `main`）
-- 第 2 個位置 → `MAX_ITER`（預設 `3`，hard cap `5`）
-- 第 3 個位置 → `REVIEWER_MODEL`（可選，必須是 alias: opus/sonnet/haiku）
-- 第 4 個位置 → `VERIFIER_MODEL`（可選，必須是 alias: opus/sonnet/haiku）
+- 1st positional → `BASE` (default `main`)
+- 2nd positional → `MAX_ITER` (default `3`, hard cap `5`)
+- 3rd positional → `REVIEWER_MODEL` (optional; must be an alias: opus/sonnet/haiku)
+- 4th positional → `VERIFIER_MODEL` (optional; must be an alias: opus/sonnet/haiku)
 
-若 `MAX_ITER > 5`，拒絕並告知使用者上限為 5。
-若使用者傳 full model id（如 `claude-opus-4-8`），拒絕並建議改用 alias。
+If `MAX_ITER > 5`, refuse and tell the user the cap is 5.
+If the user passes a full model id (e.g. `claude-opus-4-8`), refuse and suggest an alias instead.
 
-告知使用者本次參數，然後開始執行。
+Tell the user the resolved parameters, then start.
 
 ### Step 2: Phase 0 — Setup [Bash]
 
-替換 `<BASE>` 為解析後的值，執行：
+Replace `<BASE>` with the resolved value, then run:
 
 ```bash
 set -euo pipefail
@@ -68,13 +68,13 @@ echo "STATS_TSV=$STATS_TSV"
 echo "FILES=$(wc -l < $WORKDIR/changed-files.txt | tr -d ' ')"
 ```
 
-若輸出 `NO_DIFF`：告知使用者 `No diff between $BRANCH and $BASE; nothing to review.` 然後停止。
+If the output is `NO_DIFF`: tell the user `No diff between $BRANCH and $BASE; nothing to review.` and stop.
 
-**記住此步驟輸出的所有變數值**（`WORKDIR`, `REPO_ROOT`, `BRANCH`, `FINAL_REPORT`, `STATS_TSV`），後續步驟全部引用這些值。
+**Remember every variable value printed by this step** (`WORKDIR`, `REPO_ROOT`, `BRANCH`, `FINAL_REPORT`, `STATS_TSV`); all later steps reference these values.
 
 ### Step 3: Phase 0b — Carry-forward [Bash, conditional]
 
-先檢查 `FINAL_REPORT` 是否存在。**只在存在時**執行以下 Bash：
+First check whether `FINAL_REPORT` exists. **Only if it exists**, run:
 
 ```bash
 set -euo pipefail
@@ -90,41 +90,41 @@ PRIOR_N=$(wc -l < "<WORKDIR>/iter-0-needsfix.sig" | tr -d ' ')
 echo "PRIOR_N=$PRIOR_N"
 ```
 
-若 `FINAL_REPORT` 不存在，設 `PRIOR_N=0`，跳過此步驟直接進入 Step 4。
+If `FINAL_REPORT` does not exist, set `PRIOR_N=0` and skip straight to Step 4.
 
-### Step 3c: Pre-validate carry-forward `[需修正]` items [Agent + Write + Bash, conditional]
+### Step 3c: Pre-validate carry-forward `[NEEDS-FIX]` items [Agent + Write + Bash, conditional]
 
-**只在 `PRIOR_N > 0` 時執行。** 在進入 reviewer 迴圈前，先驗證 carry-forward 的 `[需修正]` 項目是否仍存在於當前程式碼中。已修正的項目標記為 `[已修正]`，避免 reviewer 浪費整輪重複報告已解決的問題。
+**Run only when `PRIOR_N > 0`.** Before entering the reviewer loop, verify whether the carried-forward `[NEEDS-FIX]` items still exist in the current code. Items already fixed get marked `[FIXED]`, so the reviewer does not waste a whole round re-reporting solved problems.
 
-1. **Spawn verifier**：
+1. **Spawn verifier**:
 
 ```
 Agent({
   subagent_type: "multi-review-verifier",
   description: "carry-forward recheck",
   model: <VERIFIER_MODEL if provided, else omit>,
-  prompt: "Re-verify only the [需修正] issues from the carry-forward report against the current code in <REPO_ROOT>.
+  prompt: "Re-verify only the [NEEDS-FIX] issues from the carry-forward report against the current code in <REPO_ROOT>.
 
 Review report path: <WORKDIR>/iter-0-verified.md
 
-IMPORTANT: Only verify issues currently annotated as [需修正]. Skip [可忽略] and [不存在] items entirely — do NOT emit verdicts for them.
+IMPORTANT: Only verify issues currently annotated as [NEEDS-FIX]. Skip [IGNORABLE] and [NONEXISTENT] items entirely — do NOT emit verdicts for them.
 
 Use these verdicts:
-- [已修正] — the issue existed in a prior review but has been fixed in the current code.
-- [需修正] — the issue still exists and needs attention.
-- [可忽略] — on re-examination, the issue is acceptable.
-Do NOT use [不存在] — all items being rechecked were previously validated as real issues.
+- [FIXED] — the issue existed in a prior review but has been fixed in the current code.
+- [NEEDS-FIX] — the issue still exists and needs attention.
+- [IGNORABLE] — on re-examination, the issue is acceptable.
+Do NOT use [NONEXISTENT] — all items being rechecked were previously validated as real issues.
 
 Your response back to me IS the verdicts list — do NOT preface with meta-commentary, do NOT echo reviewer fields, do NOT write any file.
-First line of your response MUST be [已修正], [需修正], or [可忽略] (each verdict marker at column 1).
+First line of your response MUST be [FIXED], [NEEDS-FIX], or [IGNORABLE] (each verdict marker at column 1).
 Format per issue: exactly three lines (verdict / Location: <path:line> / Evidence: <…>), records separated by a single blank line.
 End your response with the ## Verification Summary table."
 })
 ```
 
-2. **Save verifier output** [Write]：寫入 `<WORKDIR>/iter-0-recheck-verdicts.md`
+2. **Save verifier output** [Write]: write to `<WORKDIR>/iter-0-recheck-verdicts.md`
 
-3. **Process** [Bash]：
+3. **Process** [Bash]:
 
 ```bash
 set -euo pipefail
@@ -141,13 +141,13 @@ python3 $TOOLS parse-verifier-raw "$V_RAW" > "$RECHECK_ANN"
 RECHECK_COUNT=$(wc -l < "$RECHECK_ANN" | tr -d ' ')
 
 if (( RECHECK_COUNT > 0 )); then
-  # Merge: drop old [需修正] rows, replace with recheck results
-  awk -F'\t' '$2 !~ /需修正/' "$ANN_TSV" > "$WORKDIR/iter-0-ann-keep.tsv" || true
+  # Merge: drop old [NEEDS-FIX] rows, replace with recheck results
+  awk -F'\t' '$2 !~ /NEEDS-FIX/' "$ANN_TSV" > "$WORKDIR/iter-0-ann-keep.tsv" || true
   cat "$WORKDIR/iter-0-ann-keep.tsv" "$RECHECK_ANN" > "$WORKDIR/iter-0-ann-merged.tsv"
   mv "$WORKDIR/iter-0-ann-merged.tsv" "$ANN_TSV"
   rm -f "$WORKDIR/iter-0-ann-keep.tsv"
   python3 $TOOLS derive-sidecars "$ANN_TSV" "$TSV" "$SIG"
-  # Update iter-0-verified.md inline so merge picks up [已修正] verdicts
+  # Update iter-0-verified.md inline so merge picks up [FIXED] verdicts
   python3 $TOOLS reannotate "$WORKDIR/iter-0-verified.md" "$ANN_TSV" --in-place
 fi
 
@@ -156,39 +156,39 @@ RESOLVED=$((ORIG_PRIOR_N - PRIOR_N))
 echo "ORIG_PRIOR_N=$ORIG_PRIOR_N RESOLVED=$RESOLVED PRIOR_N=$PRIOR_N"
 ```
 
-告知使用者：`Carry-forward recheck: <RESOLVED> of <ORIG_PRIOR_N> previously [需修正] items already resolved; <PRIOR_N> remain.`
+Tell the user: `Carry-forward recheck: <RESOLVED> of <ORIG_PRIOR_N> previously [NEEDS-FIX] items already resolved; <PRIOR_N> remain.`
 
-若 recheck verifier 回傳 0 筆（格式問題或 agent 失敗），跳過 merge，保留原始 carry-forward 繼續進入迴圈。
+If the recheck verifier returns 0 records (format problem or agent failure), skip the merge, keep the original carry-forward, and continue into the loop.
 
 ---
 
-### Step 4: Spawn reviewer [Agent] — Round `i`（初始 `i=1`）
+### Step 4: Spawn reviewer [Agent] — Round `i` (initially `i=1`)
 
-計算本輪路徑：
+Compute this round's paths:
 - `R` = `<WORKDIR>/iter-<i>-review.md`
 - `PREV_V` = `<WORKDIR>/iter-<i-1>-verified.md`
 
-組裝 carry-forward hint：
-- PREV_V 存在：
+Assemble the carry-forward hint:
+- If PREV_V exists:
 
   ```
   Previous verified report: <PREV_V>.
-  Skip any issue already marked [不存在] there (reviewer hallucinations).
-  Skip any issue already marked [已修正] there (confirmed fixed in current code).
-  Skip any issue already marked [可忽略] (acknowledged but acceptable).
-  For items still [需修正], you MAY re-report them if you have new evidence; otherwise omit.
+  Skip any issue already marked [NONEXISTENT] there (reviewer hallucinations).
+  Skip any issue already marked [FIXED] there (confirmed fixed in current code).
+  Skip any issue already marked [IGNORABLE] (acknowledged but acceptable).
+  For items still [NEEDS-FIX], you MAY re-report them if you have new evidence; otherwise omit.
   ```
 
-- Round 1 且 Step 3c recheck 已執行：在上述 hint 末尾追加：
+- If Round 1 and the Step 3c recheck ran: append to the end of the hint above:
 
   ```
-  CARRY-FORWARD RECHECK: <WORKDIR>/iter-0-recheck-verdicts.md contains fresh re-verification of all previously [需修正] items against the current code.
-  Read it first. Items marked [已修正] have been fixed — do NOT re-report them.
+  CARRY-FORWARD RECHECK: <WORKDIR>/iter-0-recheck-verdicts.md contains fresh re-verification of all previously [NEEDS-FIX] items against the current code.
+  Read it first. Items marked [FIXED] have been fixed — do NOT re-report them.
   ```
 
-- PREV_V 不存在：`No previous iteration.`
+- If PREV_V does not exist: `No previous iteration.`
 
-呼叫 Agent：
+Call Agent:
 
 ```
 Agent({
@@ -217,7 +217,7 @@ OUTPUT INSTRUCTIONS (override the skill default):
 
 ### Step 5: Post-reviewer check [Bash]
 
-替換 `<R>` 後執行：
+Run after replacing `<R>`:
 
 ```bash
 set -euo pipefail
@@ -227,15 +227,15 @@ grep -qE '^## (Critical Issues|Performance & Optimization|Maintainability & Arch
 echo "REVIEWER_OK round <i>"
 ```
 
-若輸出 `REVIEWER_FAILED` 或 `REVIEWER_BAD_FORMAT`：**停止**，告知使用者 reviewer 在 round `<i>` 失敗，提供 `WORKDIR` 路徑供 deep dive。不要重跑。
+If the output is `REVIEWER_FAILED` or `REVIEWER_BAD_FORMAT`: **stop**, tell the user the reviewer failed at round `<i>`, and provide the `WORKDIR` path for a deep dive. Do not re-run.
 
 ### Step 6: Spawn verifier [Agent] — Round `i`
 
-計算：
+Compute:
 - `PREV_ANN_TSV` = `<WORKDIR>/iter-<i-1>-annotations.tsv`
 
-組裝 verifier consistency hint：
-- Round 2+ 且 PREV_ANN_TSV 存在：
+Assemble the verifier consistency hint:
+- Round 2+ and PREV_ANN_TSV exists:
 
   ```
   CONSISTENCY ANCHOR: Read <PREV_ANN_TSV> first (3-col TSV: Location / previous verdict / previous Evidence).
@@ -246,9 +246,9 @@ echo "REVIEWER_OK round <i>"
   Goal: stable verdicts. Flip without code-level justification is a bug. Do NOT Read prior reviewer report or verified.md.
   ```
 
-- Round 1 或 PREV_ANN_TSV 不存在：留空（不包含 consistency anchor 段落）。
+- Round 1 or PREV_ANN_TSV missing: leave empty (omit the consistency anchor section).
 
-呼叫 Agent：
+Call Agent:
 
 ```
 Agent({
@@ -262,7 +262,7 @@ Review report path: <R>
 <VERIFIER_CONSISTENCY_HINT>
 
 Your response back to me IS the verdicts list — do NOT preface with meta-commentary, do NOT echo reviewer fields, do NOT write any file.
-First line of your response MUST be [需修正], [可忽略], or [不存在] (each verdict marker at column 1).
+First line of your response MUST be [NEEDS-FIX], [IGNORABLE], or [NONEXISTENT] (each verdict marker at column 1).
 Format per issue: exactly three lines (verdict / Location: <path:line> / Evidence: <…>), records separated by a single blank line.
 End your response with the ## Verification Summary table prescribed in your agent definition."
 })
@@ -270,15 +270,15 @@ End your response with the ## Verification Summary table prescribed in your agen
 
 ### Step 7: Save verifier output [Write]
 
-將 Step 6 verifier agent 的**完整回應文字**寫入 `<WORKDIR>/iter-<i>-verdicts.md`：
+Write the **complete response text** of the Step 6 verifier agent to `<WORKDIR>/iter-<i>-verdicts.md`:
 
 ```
-Write(file_path="<WORKDIR>/iter-<i>-verdicts.md", content=<verifier 的完整回應文字>)
+Write(file_path="<WORKDIR>/iter-<i>-verdicts.md", content=<verifier's complete response text>)
 ```
 
 ### Step 8: Post-verifier processing [Bash]
 
-替換所有 `<placeholder>` 後執行。注意 `<i>` 和 `<i-1>` 需替換為實際數字：
+Run after replacing every `<placeholder>`. Note `<i>` and `<i-1>` must be replaced with actual numbers:
 
 ```bash
 set -euo pipefail
@@ -321,17 +321,17 @@ else
 fi
 ```
 
-若輸出 `VERIFIER_FORMAT_VIOLATION`：**停止**，告知使用者 verifier 在 round `<i>` 格式違規，提供 `WORKDIR` 路徑。不要重跑。
+If the output is `VERIFIER_FORMAT_VIOLATION`: **stop**, tell the user the verifier violated the format at round `<i>`, and provide the `WORKDIR` path. Do not re-run.
 
 ### Step 9: Convergence check
 
-讀取 Step 8 的輸出，根據 `SIGNAL` 決定：
+Read Step 8's output and act on `SIGNAL`:
 
-- `SIGNAL=CONVERGED`：告知使用者 `✓ Converged at round <i>: no [需修正] issues remain.`，**跳到 Step 10**
-- `SIGNAL=MAX_ITER_REACHED`：告知使用者 `● Reached max_iter=<MAX_ITER> with <NEEDS_FIX> [需修正] issue(s) remaining.`，**跳到 Step 10**
-- `SIGNAL=CONTINUE NEXT_ROUND=<N>`：告知使用者 `Round <i> done. Continuing to round <N>.`，**設 `i=<N>`，回到 Step 4**
+- `SIGNAL=CONVERGED`: tell the user `✓ Converged at round <i>: no [NEEDS-FIX] issues remain.` and **jump to Step 10**
+- `SIGNAL=MAX_ITER_REACHED`: tell the user `● Reached max_iter=<MAX_ITER> with <NEEDS_FIX> [NEEDS-FIX] issue(s) remaining.` and **jump to Step 10**
+- `SIGNAL=CONTINUE NEXT_ROUND=<N>`: tell the user `Round <i> done. Continuing to round <N>.`, **set `i=<N>` and go back to Step 4**
 
-**CRITICAL**：若 SIGNAL 為 CONTINUE，你的下一個 response 必須包含 Step 4 的 Agent tool call。不可以只輸出文字。
+**CRITICAL**: if SIGNAL is CONTINUE, your next response must contain the Step 4 Agent tool call. Text-only output is not allowed.
 
 ---
 
@@ -343,36 +343,36 @@ python3 ~/.ai-assistant/scripts/multi-review-tools.py merge "<WORKDIR>" "<FINAL_
 echo "Final report: <FINAL_REPORT>"
 ```
 
-若 merge 失敗：告知使用者 merge 階段失敗，提供 `WORKDIR` 路徑。不要重跑。
+If the merge fails: tell the user the merge phase failed and provide the `WORKDIR` path. Do not re-run.
 
 ### Step 11: Phase 3 — Summary + Report
 
-1. **取得 summary table** [Bash]：
+1. **Get the summary table** [Bash]:
 
 ```bash
 set -euo pipefail
 python3 ~/.ai-assistant/scripts/multi-review-tools.py summary-table "<STATS_TSV>"
 ```
 
-2. **讀取最終報告** [Read]：開啟 `<FINAL_REPORT>`
+2. **Read the final report** [Read]: open `<FINAL_REPORT>`
 
-3. **報告結果**：
-   - 該檔是 **cumulative**：每個 issue 依 Location 去重後只出現一次，verdict 取最後一輪判定；block 內容來自首次出現該 issue 的那輪（標註 `_(origin: iter-N)_`）。前面輪次的 `[可忽略]` / `[不存在]` 即使後續輪次的 reviewer 跳過了也會保留在最終報告
-   - 依序按 `## Critical Issues`（P0）→ `## Performance & Optimization`（P1）→ `## Maintainability & Architecture`（P2）列出所有 `[需修正]` 項目的**標題 + Location**（一行一個）；section 本身就承擔嚴重程度語意
-   - 依檔案歸納要動哪幾個檔案
-   - 附上 per-round breakdown 表格（Step 11.1 的輸出）
-   - 若 `[不存在]` 比例 > 30%，提醒「reviewer 可能有幻覺、建議人工抽檢」
-   - 若 `[可忽略]` 有重要項目，提一句「下列雖標為可忽略但值得知道：...」
-   - 結尾告知 `.tasks/<BRANCH>/review.md` 路徑（跨 run 持續更新，會被下次執行當 iter-0 anchor）以及這次的 timestamped 中間檔位置 `WORKDIR`
+3. **Report the results**:
+   - The file is **cumulative**: each issue appears once (deduped by Location), with the verdict taken from the last round that judged it; the block content comes from the round where the issue first appeared (tagged `_(origin: iter-N)_`). Earlier rounds' `[IGNORABLE]` / `[NONEXISTENT]` items are preserved in the final report even when later rounds' reviewers skipped them
+   - List every `[NEEDS-FIX]` item's **title + Location** (one per line), ordered `## Critical Issues` (P0) → `## Performance & Optimization` (P1) → `## Maintainability & Architecture` (P2); the section itself carries the severity semantics
+   - Group by file which files need changes
+   - Attach the per-round breakdown table (output of Step 11.1)
+   - If the `[NONEXISTENT]` ratio > 30%, warn that the reviewer may be hallucinating and recommend manual spot-checks
+   - If any `[IGNORABLE]` items are noteworthy, add one line: "the following are marked ignorable but worth knowing: ..."
+   - End by giving the `.tasks/<BRANCH>/review.md` path (continuously updated across runs; used as the iter-0 anchor next run) and this run's timestamped intermediate directory `WORKDIR`
 
 ---
 
 ## Constraints
 
-- **不要自動修檔**——使用者要看完報告再決定
-- 不要重跑迴圈。若使用者要再跑，請他自行加新參數
-- 若任何步驟 ABORT：不要嘗試讀 `review.md`、不要從部分產物推測
-- Model 參數**只接受 alias**（`opus` / `sonnet` / `haiku`）；若使用者傳 full id，拒絕並建議改用 alias
-- `MAX_ITER` 上限為 5（context 安全邊界）；若使用者要更高請拒絕並建議拆多次跑
-- 每一個 Bash 呼叫的第一行**必須**是 `set -euo pipefail`
-- **不要**讀取 `iter-N-review.md` 或 `iter-N-verified.md` 進你自己的 context 來「分析」——用 `count-sections` 和 `derive-sidecars` 做結構性檢查
+- **Never auto-fix files** — the user decides after reading the report
+- Never re-run the loop. If the user wants another run, have them invoke the command again with new arguments
+- If any step ABORTs: do not try to read `review.md`; do not extrapolate from partial artifacts
+- Model parameters **accept aliases only** (`opus` / `sonnet` / `haiku`); if the user passes a full id, refuse and suggest an alias
+- `MAX_ITER` is capped at 5 (context safety margin); if the user wants more, refuse and suggest splitting into multiple runs
+- The first line of **every** Bash call MUST be `set -euo pipefail`
+- Do **not** read `iter-N-review.md` or `iter-N-verified.md` into your own context to "analyze" them — use `count-sections` and `derive-sidecars` for structural checks

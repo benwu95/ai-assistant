@@ -26,9 +26,23 @@ from pathlib import Path
 
 # === Shared constants =======================================================
 
-VERDICTS = ("需修正", "可忽略", "不存在")
-VERDICT_FIXED = "已修正"
+VERDICTS = ("NEEDS-FIX", "IGNORABLE", "NONEXISTENT")
+VERDICT_FIXED = "FIXED"
 ALL_VERDICTS = (*VERDICTS, VERDICT_FIXED)
+
+# Reports written before the English-marker migration used Chinese markers;
+# keep parsing them (normalized on read) so old review.md carry-forward
+# anchors don't silently lose their verdicts.
+LEGACY_VERDICT_MAP = {
+    "需修正": "NEEDS-FIX",
+    "可忽略": "IGNORABLE",
+    "不存在": "NONEXISTENT",
+    "已修正": "FIXED",
+}
+
+
+def normalize_verdict(verdict):
+    return LEGACY_VERDICT_MAP.get(verdict, verdict)
 
 ISSUE_SECTIONS = (
     "Critical Issues",
@@ -53,7 +67,7 @@ SECTION_RE = re.compile(r'^## (.+?)\s*$')
 BULLET_RE = re.compile(r'^(?:- \*\*|### )')
 # Location: bold (canonical) or plain (drift), with or without surrounding backticks
 LOCATION_RE = re.compile(r'(?:\*\*Location\*\*:|^Location:)\s*`?([A-Za-z0-9_./\-]+:\d+)')
-VERDICT_RE = re.compile(r'^\[(' + '|'.join(ALL_VERDICTS) + r')\]\s*$')
+VERDICT_RE = re.compile(r'^\[(' + '|'.join((*ALL_VERDICTS, *LEGACY_VERDICT_MAP)) + r')\]\s*$')
 EVIDENCE_RE = re.compile(r'^Evidence:')
 TITLE_BULLET_RE = re.compile(r'^(- \*\*[^*]+\*\*)(.*)$')
 TITLE_H3_RE = re.compile(r'^### .+$')
@@ -128,7 +142,7 @@ def extract_verdict_evidence(block):
     for line in block:
         vm = VERDICT_RE.match(line)
         if vm:
-            verdict = vm.group(1)
+            verdict = normalize_verdict(vm.group(1))
         elif EVIDENCE_RE.match(line):
             evidence = line
     return verdict, evidence
@@ -214,7 +228,7 @@ def iter_num(path):
 def collect_iter_files(workdir):
     # iter-0-verified.md, when present, is the carry-forward anchor (a copy of
     # the prior run's cumulative review.md). Including it preserves issues the
-    # current run's reviewer chose to omit — otherwise the prior [需修正] items
+    # current run's reviewer chose to omit — otherwise the prior [NEEDS-FIX] items
     # would vanish from the new cumulative report once carried forward.
     files = [p for p in Path(workdir).glob("iter-*-verified.md") if iter_num(p) >= 0]
     return sorted(files, key=iter_num)
@@ -336,8 +350,8 @@ class MergeState:
         out.append("")
         out.append("Cumulative across all iterations (each issue counted once with its latest verdict).")
         out.append("")
-        out.append("| 結論   | 數量 |")
-        out.append("| ------ | ---- |")
+        out.append("| Verdict | Count |")
+        out.append("| ------- | ----- |")
         show_verdicts = ALL_VERDICTS if final_counts.get(VERDICT_FIXED, 0) > 0 else VERDICTS
         for v in show_verdicts:
             out.append(f"| {v} | {final_counts[v]} |")
@@ -445,7 +459,7 @@ def cmd_extract_annotations(args):
     for line in p.read_text().splitlines():
         vm = VERDICT_RE.match(line)
         if vm:
-            current_verdict = vm.group(1)
+            current_verdict = normalize_verdict(vm.group(1))
             continue
         if current_verdict and EVIDENCE_RE.match(line):
             m = PATH_LINE_RE.search(line)
@@ -474,7 +488,7 @@ def cmd_parse_verifier_raw(args):
     for line in p.read_text().splitlines():
         vm = VERDICT_RE.match(line)
         if vm:
-            verdict = vm.group(1)
+            verdict = normalize_verdict(vm.group(1))
             loc = None
             continue
         m = LOCATION_RE.match(line)
@@ -541,8 +555,8 @@ def cmd_verification_summary(args):
                 counts[cols[1]] += 1
     print("## Verification Summary")
     print()
-    print("| 結論     | 數量 |")
-    print("| -------- | ---- |")
+    print("| Verdict | Count |")
+    print("| ------- | ----- |")
     for v in VERDICTS:
         print(f"| {v}   | {counts[v]}    |")
 
@@ -649,8 +663,8 @@ def cmd_diff_rounds(args):
 
 def cmd_summary_table(args):
     """Render the per-round breakdown table from stats.tsv to stdout."""
-    print("| round | Critical | Performance | Maintainability | 需修正 | 可忽略 | 不存在 | 新增[需修正] |")
-    print("|-------|----------|-------------|-----------------|--------|--------|--------|---------------|")
+    print("| round | Critical | Performance | Maintainability | NEEDS-FIX | IGNORABLE | NONEXISTENT | new NEEDS-FIX |")
+    print("|-------|----------|-------------|-----------------|-----------|-----------|-------------|---------------|")
     p = Path(args.stats_tsv)
     if not p.exists():
         return

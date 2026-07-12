@@ -6,30 +6,30 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(cat:*), Bash(ls:*), Bas
 
 # Review-to-PR
 
-把一份本地 `review.md`（multi-review / code review 產出的整合報告）裡所抓到、但**目標 PR 既有留言尚未涵蓋**的問題，做成一份 bundled inline review comments 送到 GitHub PR。
+Take the issues captured in a local `review.md` (the merged report produced by multi-review / code review) that are **not yet covered by the target PR's existing comments**, and submit them to the GitHub PR as one bundled set of inline review comments.
 
-同時：**在送出新 comment 之前，先檢視 PR 上由當前使用者（`authUser`）開啟、目前仍 `unresolved` 的 review thread**，逐條對照當前程式碼，把已修正（或經作者 acknowledge 為「刻意不做」）的 thread 詢問使用者後一併 `resolve`。
+Additionally: **before posting new comments, inspect the PR's review threads opened by the current user (`authUser`) that are still `unresolved`**, check each against the current code, and — after asking the user — `resolve` the ones already fixed (or acknowledged by the author as intentionally not done).
 
-整體流程強調：
-- **不自動修檔**、**不自動送出**——使用者要看過 preview 並明確同意才送
-- **不自動 resolve thread**——即使顯示「已修正」，也要使用者最後勾選 / 同意才執行 `resolveReviewThread` mutation
-- 每條 comment 以條列式呈現，繁體中文台灣用語，專業術語保留英文
-- 引用既有 PR 評論者時：若該 user 為當前 gh CLI auth 帳號，改寫成「我」；其餘維持 `@username`
+The flow emphasizes:
+- **No auto-fixing files, no auto-submitting** — the user must see a preview and explicitly agree before anything is sent
+- **No auto-resolving threads** — even when an item shows as fixed, the user must confirm before the `resolveReviewThread` mutation runs
+- Each comment body is bulleted, written in Traditional Chinese (Taiwan) with technical terms kept in English
+- When quoting existing PR commenters: if that user is the current gh CLI auth account, rewrite as 「我」; otherwise keep `@username`
 
 ---
 
 ## Inputs
 
-- `review_path`（位置參數，選填）：要讀的 review 報告路徑
-  - 若使用者帶引數，直接用該路徑
-  - 否則依下列優先序自動找：
+- `review_path` (positional, optional): path of the review report to read
+  - If the user passes an argument, use that path
+  - Otherwise auto-discover in this order:
     1. `.tasks/{currentBranch}/review-merged.md`
     2. `.tasks/{currentBranch}/review.md`
-  - 都找不到 → 提示使用者明確指定路徑後中止
-- `currentBranch`：`git rev-parse --abbrev-ref HEAD`
-- `prNumber`：用 `gh pr list --head {currentBranch} --state open --json number --jq '.[0].number'` 取得；若無對應 PR → 提示後中止
-- `authUser`：`gh api user --jq .login` 取得，作為「我」的替換對象
-- `workDir`：`.tasks/{currentBranch}/review-to-pr/`，所有中間檔與 JSON payload 的存放處（`mkdir -p` 建立；沿用 `.tasks/` artifact 慣例，不用 `/tmp` 以免被系統清除）
+  - Neither found → ask the user to specify a path explicitly, then abort
+- `currentBranch`: `git rev-parse --abbrev-ref HEAD`
+- `prNumber`: from `gh pr list --head {currentBranch} --state open --json number --jq '.[0].number'`; no matching PR → notify and abort
+- `authUser`: `gh api user --jq .login`, the identity substituted as 「我」
+- `workDir`: `.tasks/{currentBranch}/review-to-pr/`, home of all intermediates and JSON payloads (`mkdir -p` it; follows the `.tasks/` artifact convention — not `/tmp`, which the system may clean)
 
 ---
 
@@ -37,35 +37,35 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(cat:*), Bash(ls:*), Bas
 
 ### Phase 1 — Context Retrieval
 
-並行執行（單一訊息內多個 Bash tool call）：
+Run in parallel (multiple Bash tool calls in a single message):
 
 1. `git rev-parse --abbrev-ref HEAD` → currentBranch
-2. `gh pr list --head {currentBranch} --state open --json number,title,url,headRefOid` → prNumber、headRefOid、PR URL
+2. `gh pr list --head {currentBranch} --state open --json number,title,url,headRefOid` → prNumber, headRefOid, PR URL
 3. `gh api user --jq .login` → authUser
-4. Read review file（依 Inputs 規則決定路徑）
+4. Read the review file (path per the Inputs rules)
 
-若 PR 不存在 / 找不到 review 檔 → 用一句話告訴使用者並中止，不要硬猜。
+If the PR does not exist / the review file cannot be found → tell the user in one sentence and abort; do not guess.
 
-### Phase 2 — 抓 PR 既有留言 + Review Threads
+### Phase 2 — Fetch existing PR comments + review threads
 
-並行執行：
+Run in parallel:
 
-1. **Inline review comments**：
+1. **Inline review comments**:
    ```
    gh api repos/{owner}/{repo}/pulls/{prNumber}/comments --paginate \
      --jq '[.[] | {id, user: .user.login, path, line, original_line, body}]'
    ```
-2. **Issue-level（PR 對話區）comments**：
+2. **Issue-level (PR conversation) comments**:
    ```
    gh api repos/{owner}/{repo}/issues/{prNumber}/comments --paginate \
      --jq '[.[] | {id, user: .user.login, body}]'
    ```
-3. **PR reviews**（含 review-level body，例如 approval / changes-requested 的整體留言）：
+3. **PR reviews** (including review-level bodies, e.g. the overall message on an approval / changes-requested):
    ```
    gh api repos/{owner}/{repo}/pulls/{prNumber}/reviews --paginate \
      --jq '[.[] | {id, user: .user.login, state, body}]'
    ```
-4. **Review threads（GraphQL，含 resolve 狀態）**：REST API 不曝露 thread node id 與 `isResolved`，但 Phase 3 的 resolve 動作必須拿到 thread node id，所以這裡要打 GraphQL：
+4. **Review threads (GraphQL, with resolve state)**: the REST API exposes neither thread node ids nor `isResolved`, but Phase 3's resolve action requires thread node ids, so hit GraphQL here:
    ```bash
    gh api graphql -f query='
      query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
@@ -94,20 +94,20 @@ allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(cat:*), Bash(ls:*), Bas
      }' -F owner={owner} -F name={repo} -F number={prNumber} \
        --jq '.data.repository.pullRequest.reviewThreads'
    ```
-   - 若 `pageInfo.hasNextPage == true` → 帶 `-F cursor={endCursor}` 續拉
-   - 結果寫成 `{workDir}/pr-{prNumber}-threads.json`，後續 Phase 3 / Phase 4 都會用
+   - If `pageInfo.hasNextPage == true` → continue with `-F cursor={endCursor}`
+   - Write the result to `{workDir}/pr-{prNumber}-threads.json`; Phases 3 and 4 both use it
 
-> owner/repo 從 `gh repo view --json owner,name --jq '.owner.login + "/" + .name'` 拿。
+> Get owner/repo from `gh repo view --json owner,name --jq '.owner.login + "/" + .name'`.
 
-### Phase 3 — 驗證 `authUser` 自己既有 thread，互動式 Resolve
+### Phase 3 — Verify `authUser`'s existing threads; interactive resolve
 
-> 在貼新 comment 之前，先 close 掉已完成的舊 thread——這比「先洗版新 comment、再回頭 resolve」對 PR 作者更友善（同一通知、同一視野）。
+> Close out finished old threads before posting new comments — kinder to the PR author than flooding new comments first and resolving afterwards (same notification, same view).
 
-**目的**：找出 PR 上由 `authUser`（你自己）開啟、目前仍 `isResolved=false` 的 review thread，逐條對照當前程式碼，把已修正 / 經作者明確 acknowledge 為「刻意不做」的條目，徵得使用者同意後一次 `resolveReviewThread`。
+**Goal**: find review threads on the PR opened by `authUser` (yourself) that are still `isResolved=false`, check each against the current code, and — with the user's consent — batch-`resolveReviewThread` the ones that are fixed or explicitly acknowledged by the author as won't-do.
 
-#### Step 3.1 — 篩選候選
+#### Step 3.1 — Filter candidates
 
-從 Phase 2 拿到的 `{workDir}/pr-{prNumber}-threads.json` 過濾：
+Filter `{workDir}/pr-{prNumber}-threads.json` from Phase 2:
 
 ```bash
 jq -r '.nodes[]
@@ -117,42 +117,42 @@ jq -r '.nodes[]
   {workDir}/pr-{prNumber}-threads.json > {workDir}/pr-{prNumber}-resolve-candidates.tsv
 ```
 
-每行：`thread_id`、`path`、`line`、`root_review_id`。
+Each line: `thread_id`, `path`, `line`, `root_review_id`.
 
-#### Step 3.2 — 對每條候選分類
+#### Step 3.2 — Classify each candidate
 
-逐條判斷當前程式碼狀態。可採以下其中一種策略：
+Judge the current code state per candidate. Either strategy:
 
-- **小批量（≤ 10 條）**：主 agent 直接讀檔比對，標記每條的 `verdict`
-- **大批量（> 10 條）**：丟給 `multi-review-verifier` subagent 批次驗證，回傳每條的 `verdict`
+- **Small batch (≤ 10)**: the main agent reads and compares directly, tagging each item's `verdict`
+- **Large batch (> 10)**: hand off to the `multi-review-verifier` subagent for batch verification, returning each item's `verdict`
 
-每條的 `verdict` 取四種其中之一：
+Each `verdict` is one of four:
 
-| Verdict | 定義 | 預設 resolve 候選 |
-|---------|------|------------------|
-| `[已修正]` | 當前程式碼已直接 / 等價解決原 thread 提出的問題 | **是**（預設勾選） |
-| `[刻意未做]` | 程式碼未改，但 thread 後續 reply 顯示作者已說明為何不修，且使用者過去未再追問 | **是**（預設勾選） |
-| `[作者異議]` | 作者已 reply 但理由你不接受、或仍需追問——技術上未達共識 | **否**（不勾選；提示人工 follow-up） |
-| `[未修]` | 程式碼仍存在原問題，作者也未回覆 | **否**（不勾選；通常代表還沒處理） |
+| Verdict | Meaning | Default resolve candidate |
+|---------|---------|---------------------------|
+| `[FIXED]` | the current code directly / equivalently resolves the issue the thread raised | **yes** (pre-checked) |
+| `[WONT-FIX]` | code unchanged, but later replies show the author explained why, and the user did not push back | **yes** (pre-checked) |
+| `[DISPUTED]` | the author replied but the reasoning is unconvincing or needs follow-up — no technical consensus yet | **no** (unchecked; flag for manual follow-up) |
+| `[UNFIXED]` | the original problem remains in the code and the author has not replied | **no** (unchecked; usually means not yet addressed) |
 
-判定輔助規則：
-- thread 內所有 comment 都是 `authUser` 自己，沒有作者回覆 → 多半是 `[未修]` 或 `[已修正]`，依程式碼狀態判
-- 作者最後一句 reply 含「fixed」/「done」/「removed」/「updated」/「many thanks」之類 → 程式碼確認後可標 `[已修正]`
-- 作者 reply 含明確設計取捨理由（「目前 AC 不支援」、「之後支援多檔再說」之類）→ `[刻意未做]`
-- 注意排除「使用者剛剛在本次流程才送出、屬於本次 review payload 的 thread」——這些 thread 的 `root_review_id` 會等於 Phase 7 即將送出的 review id（在 Phase 3 階段尚未產生，無需處理；但若有「先前同名 review payload 留下、尚未 resolve」的，仍會被列入候選，由 verdict 決定要不要 resolve）
+Judgment aids:
+- Every comment in the thread is `authUser`'s own with no author reply → most likely `[UNFIXED]` or `[FIXED]`, decided by the code state
+- The author's last reply contains "fixed" / "done" / "removed" / "updated" / "many thanks" or similar → verify the code, then mark `[FIXED]`
+- The author's reply gives an explicit design trade-off ("current AC doesn't support it", "revisit when multi-file lands", etc.) → `[WONT-FIX]`
+- Exclude threads the user just submitted within this very flow — their `root_review_id` equals the review id Phase 7 is about to create (nonexistent at Phase 3 time, nothing to handle); but leftovers from a previous same-purpose review payload, still unresolved, do become candidates and their verdicts decide
 
-#### Step 3.3 — Preview 與互動
+#### Step 3.3 — Preview and interaction
 
-用 **AskUserQuestion** 提供 4 個選項（每輪保持一致）：
+Use **AskUserQuestion** with 4 options (consistent every round):
 
-1. **查看分類** — 顯示候選 thread 依 verdict 分組的清單，並標示哪幾條預設勾選
-2. **調整勾選** — 詢問編號 + 動作（加入 / 移除 resolve 清單）
-3. **執行 Resolve** — 把目前勾選的 thread 批次 `resolveReviewThread`
-4. **跳過 Resolve 步驟** — 不 resolve 任何 thread，直接進 Phase 4
+1. **View classification** — show the candidate threads grouped by verdict, marking which are pre-checked
+2. **Adjust selection** — ask for indices + action (add to / remove from the resolve list)
+3. **Execute resolve** — batch `resolveReviewThread` on the currently selected threads
+4. **Skip resolve step** — resolve nothing, go straight to Phase 4
 
-不要替使用者擅自 resolve `[作者異議]` / `[未修]`，即使數量少也要使用者明確加入。
+Never resolve `[DISPUTED]` / `[UNFIXED]` on the user's behalf — even when there are only a few, the user must add them explicitly.
 
-#### Step 3.4 — 執行 Resolve（使用者選 3 時）
+#### Step 3.4 — Execute resolve (user picks 3)
 
 ```bash
 while IFS=$'\t' read -r thread_id path line; do
@@ -168,106 +168,107 @@ while IFS=$'\t' read -r thread_id path line; do
 done < {workDir}/pr-{prNumber}-resolve-final.tsv
 ```
 
-> **注意**：某些 shell 環境 `gh` 不在 `$PATH`（例如 sandboxed subshell）。若直接呼 `gh` 失敗，先以 `command -v gh` 解析出絕對路徑再帶入指令；不要寫死安裝路徑。
+> **Note**: some shell environments lack `gh` on `$PATH` (e.g. sandboxed subshells). If calling `gh` directly fails, resolve its absolute path with `command -v gh` first; never hardcode an install path.
 
-執行後回報：`resolved=N failed=M`，並列出失敗的 path:line（通常是 thread 被別人提前 resolve、或網路問題）。
+Afterwards report `resolved=N failed=M` and list the failed path:line entries (usually a thread someone else resolved first, or network issues).
 
-#### Step 3.5 — 進下一階段
+#### Step 3.5 — Continue
 
-無論使用者選了哪個分支，最後都會進 **Phase 4**。Resolve 結果（含 verdict 分類與實際 resolved count）保留到最後 summary。
+Whichever branch the user chose, proceed to **Phase 4**. Keep the resolve results (verdict classification and actual resolved count) for the final summary.
 
 ---
 
-### Phase 4 — 比對 Review vs PR
+### Phase 4 — Diff review vs PR
 
-把 review 報告解析成 issue list（每筆有 file、line、標題、問題敘述、建議 fix）。
+Parse the review report into an issue list (each with file, line, title, problem statement, suggested fix).
 
-對每筆 review issue，判斷它是否已被 PR 涵蓋：
+For each review issue, decide whether the PR already covers it:
 
-**覆蓋判定（任一條件成立即視為已涵蓋）**：
-- PR inline comment 落在同一檔案的 ±20 行範圍內，且 body 文字與該 review issue 的標題或核心關鍵詞語意相近
-- PR issue-level / review-level body 內提到該 issue 的關鍵 location 或 topic
-- **Phase 3 剛剛 resolve 掉的 thread 也算「已涵蓋」** —— 那已經是 closed loop，沒必要再貼新 comment
+**Coverage test (any one condition suffices)**:
+- A PR inline comment within ±20 lines in the same file whose body is semantically close to the issue's title or key terms
+- A PR issue-level / review-level body mentions the issue's key location or topic
+- **Threads just resolved in Phase 3 also count as covered** — that loop is closed; no need to post again
 
-不確定的，**寧可保守視為「已涵蓋」並列在「skipped」清單**，最後讓使用者過目。不要把 PR 沒提到的硬塞給已覆蓋；也不要把 PR 已說過的再貼一次。
+When uncertain, **err toward "covered" and put the item on the `skipped` list** for the user to eyeball at the end. Don't re-post what the PR already said; don't claim coverage for what it never mentioned.
 
-**比對輸出**（內部資料結構，給後續步驟用）：
-- `to_post`：review 抓到、PR 沒提到 → 要送的清單
-- `skipped`：review 抓到、PR 已用近似方式提到 → 不送，但要在最後 summary 提一句
-- `not_in_review`：PR 已提但 review 沒抓到 → 不處理，但可在 summary 點一下「PR 有點到這幾項是 review 沒抓到的補充」
+**Comparison output** (internal data for later steps):
+- `to_post`: found by the review, absent from the PR → to be posted
+- `skipped`: found by the review, already approximated by the PR → not posted, but mentioned in the final summary
+- `not_in_review`: raised on the PR but missed by the review → untouched, though the summary may note "the PR raises these points the review missed"
 
-### Phase 5 — 生成 inline comment bodies
+### Phase 5 — Generate inline comment bodies
 
-每條 `to_post` 產生一段 markdown body，遵守以下風格：
+Each `to_post` item gets a markdown body in this style:
 
-**結構**（固定模板）：
+**Structure** (fixed template; the labels are literal Traditional Chinese output):
+
 ```
 **[P{priority}] {標題}**
 
-{視情況加 1-2 句背景，或直接跳到問題}
+{optionally 1-2 sentences of background, or jump straight to the problem}
 
 **問題**：
-- 條列點 1
-- 條列點 2
+- bullet 1
+- bullet 2
 - ...
 
 **建議**：
-- 條列 or 短段
-- 視情況附 `code block`（盡量精簡，只保留關鍵幾行）
+- bullets or a short paragraph
+- optionally a `code block` (keep it minimal — only the key lines)
 ```
 
-**字數**：每條 body 控制在 ~150 字內（不含 code block）。code block 抓重點，不貼整段 diff。
+**Length**: keep each body within ~150 Chinese characters (code blocks excluded). Code blocks show the key lines only, never a whole diff.
 
-**語言**（遵循 `~/.ai-assistant/shared/taiwan-terminology.md` 用語對照與排版規則）：
+**Language** (follow the terminology table and typography rules in `~/.ai-assistant/shared/taiwan-terminology.md`):
 
-- 繁體中文 + 台灣用語
-- 專業術語保留英文：lock / race / commit / SQS / DB session / identity map / atomic UPDATE / context manager / closure / generator 等
-- 行內 code / 路徑 / 識別字用反引號
-- **中英文混排時，英文單字前後加半形空格**（例：`獨立 Session 審查機制`、`改用 SELECT FOR UPDATE`）
-- 標點使用全形（，。、：；「」），英文專有名詞可混用半形標點
+- Traditional Chinese, Taiwan usage
+- Technical terms stay in English: lock / race / commit / SQS / DB session / identity map / atomic UPDATE / context manager / closure / generator, etc.
+- Inline code / paths / identifiers in backticks
+- **Half-width spaces around English words in mixed text** (e.g. `獨立 Session 審查機制`, `改用 SELECT FOR UPDATE`)
+- Full-width punctuation (，。、：；「」); half-width punctuation is acceptable around English proper nouns
 
-**Cross-link 規則**：
-- 若 review 評論需要引用 PR 既有評論者：
-  - 若該 user == `authUser` → 改寫成「我」（例如：「呼應我在 `validation:85` 的評論」）
-  - 否則保留 `@username`（例如：「呼應 @other-user 在 `validation:85` 的評論」）
-- 若 review 評論需要引用 git commit SHA（如 `e2201cfff`），保留原樣
+**Cross-link rules**:
+- When a comment must reference an existing PR commenter:
+  - that user == `authUser` → rewrite as 「我」 (e.g. 「呼應我在 `validation:85` 的評論」)
+  - otherwise keep `@username` (e.g. 「呼應 @other-user 在 `validation:85` 的評論」)
+- Keep git commit SHAs (e.g. `e2201cfff`) verbatim
 
-**Priority 標記**：從 review.md 標題 / table 抓 P0/P1/P2，前綴 `[P{level}]`。沒有的就省略。
+**Priority tag**: take P0/P1/P2 from the review.md headings / table and prefix `[P{level}]`. Omit when absent.
 
-**Code block 規則**：
-- Python code 用 ```` ```python ```` 包
-- 縮排正常
-- f-string 中的 `}}` 不要用 Python escape，直接寫
-- 字串內含中文時注意 JSON escape（之後產 payload 時要處理）
+**Code block rules**:
+- Wrap Python code in ```` ```python ````
+- Normal indentation
+- Don't Python-escape `}}` inside f-strings; write it as-is
+- Mind JSON escaping when strings contain Chinese (handled at payload-generation time)
 
-### Phase 6 — Preview 與互動 Loop
+### Phase 6 — Preview & interaction loop
 
-進入互動迴圈，**每輪用 AskUserQuestion**，選項固定 4 個：
+Enter an interactive loop; **each round uses AskUserQuestion** with a fixed set of 4 options:
 
-1. **查看內容** — 把 `to_post` 清單以 `[#N | P{level}] {file}:{line} — {標題}` 一行一個列出；再問使用者要看哪幾條完整 body（可以「全部」、「P0 only」、「指定編號 1,3,5」、「指定編號 1」、「跳過直接送」）。把選的條目用 markdown blockquote 形式 echo 出來。
-2. **修改內容** — 詢問要改哪些（編號 + 改什麼）。常見模式：
-   - 刪除某幾條
-   - 改寫某條 body（請使用者口頭描述方向，由你重寫）
-   - 改變落點 line
-   - 整體再縮短 / 整體改更白話
-   - 合併某幾條 / 拆分某條
-   修改完後**回到迴圈開頭**重新顯示主問題（不要自動送）。
-3. **發送至 GitHub** — 進 Phase 7。
-4. **取消** — 中止。把 JSON payload 保留在 `{workDir}/review-to-pr-{prNumber}.json` 並告訴使用者路徑，方便事後手動處理。
+1. **View content** — list `to_post` as `[#N | P{level}] {file}:{line} — {title}`, one per line; then ask which full bodies to show ("all", "P0 only", "indices 1,3,5", "index 1", "skip and send"). Echo the chosen items as markdown blockquotes.
+2. **Edit content** — ask which items to change (index + what). Common patterns:
+   - delete some items
+   - rewrite a body (the user describes the direction verbally; you rewrite)
+   - change the anchor line
+   - shorten everything / make everything plainer
+   - merge some items / split one
+   After editing, **return to the top of the loop** and re-show the main question (never auto-send).
+3. **Send to GitHub** — proceed to Phase 7.
+4. **Cancel** — abort. Keep the JSON payload at `{workDir}/review-to-pr-{prNumber}.json` and tell the user the path for manual follow-up.
 
-迴圈持續直到使用者選「發送」或「取消」。**不要替使用者做決定**；即使所有 P2 都看完了，也要回到主問題等使用者明確下決定。
+Loop until the user picks Send or Cancel. **Never decide for the user**; even after every P2 has been viewed, return to the main question and wait for an explicit decision.
 
-> **特例：`to_post` 為空** — 若 Phase 4 比對後沒任何要新貼的 comment（review 全部被 PR 既有評論或 Phase 3 剛 resolve 的 thread 涵蓋），直接跳過 Phase 6，告知使用者「沒有新東西要送」並把 Phase 3 的 resolve 結果作為 final summary。
+> **Special case: `to_post` empty** — if Phase 4 finds nothing new to post (everything covered by existing comments or threads just resolved in Phase 3), skip Phase 6, tell the user "nothing new to send", and use Phase 3's resolve results as the final summary.
 
-### Phase 7 — 送出
+### Phase 7 — Submit
 
-把所有 `to_post` 條目組裝成單一 Review payload：
+Assemble all `to_post` items into a single review payload:
 
 ```json
 {
   "commit_id": "{headRefOid}",
   "event": "COMMENT",
-  "body": "{overall summary，列 P0/P1/P2 數量與一行 topic 概要}",
+  "body": "{overall summary: P0/P1/P2 counts and a one-line topic overview}",
   "comments": [
     {"path": "...", "line": N, "body": "..."},
     ...
@@ -275,7 +276,7 @@ done < {workDir}/pr-{prNumber}-resolve-final.tsv
 }
 ```
 
-寫到 `{workDir}/review-to-pr-{prNumber}.json`，然後：
+Write it to `{workDir}/review-to-pr-{prNumber}.json`, then:
 
 ```bash
 gh api -X POST repos/{owner}/{repo}/pulls/{prNumber}/reviews \
@@ -283,57 +284,56 @@ gh api -X POST repos/{owner}/{repo}/pulls/{prNumber}/reviews \
   --jq '{id, state, html_url, submitted_at}'
 ```
 
-**驗證落地**：
+**Verify landing**:
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/{prNumber}/comments --paginate \
   --jq '[.[] | select(.pull_request_review_id == {review_id})] | length'
 ```
 
-回報（合併 Phase 3 + Phase 7 結果）：
-- **Phase 3**：候選 thread 總數、verdict 分類計數、實際 resolved count、保留未 resolve 的清單摘要
-- **Phase 7**：Review URL、inline comment 落地數量、與預期一致 / 不一致（不一致時列出哪幾條沒落地）
-- `skipped` 清單摘要（讓使用者知道哪幾條 review 抓到的 PR 已經提了所以沒送）
+Report (merging Phase 3 + Phase 7 results):
+- **Phase 3**: candidate thread count, verdict class counts, actual resolved count, summary of threads left unresolved
+- **Phase 7**: review URL, number of inline comments landed, whether it matches expectations (if not, list which items didn't land)
+- `skipped` summary (so the user knows which review findings were already raised on the PR and thus not sent)
 
 ---
 
-## Taiwan 用語對照（必須遵循）
+## Taiwan Terminology (mandatory)
 
-遵循 `~/.ai-assistant/shared/taiwan-terminology.md` 用語對照與排版規則。
+Follow the terminology table and typography rules in `~/.ai-assistant/shared/taiwan-terminology.md`.
 
 ---
 
 ## Constraints
 
-- **絕不在送出 / Resolve 前修改 PR 上任何內容**——Phase 1-4 全部 read-only。
-- **絕不送出未經使用者明確同意的 review**。即使 `to_post` 為空，也要明確告知使用者「沒有新東西要送」並等待確認。
-- **絕不未經使用者明確同意 resolve 任何 thread**。Phase 3 即使 verdict 顯示 `[已修正]` / `[刻意未做]`，也只是「預設勾選」，最後必須使用者點「執行 Resolve」才會打 mutation。
-- **不要 resolve 非 `authUser` 開啟的 thread**——本指令只負責使用者自己的舊評論，不替別人 close conversation。
-- **不要 resolve 本次流程剛送出的新 thread**（review_id 等於 Phase 7 reply 的 review id）。
-- **不要重跑 multi-review**。本指令只負責把現成的 review.md 同步到 PR。
-- **不要修改本地 review.md**。如果發現 review 內容有問題，告訴使用者，由使用者決定要不要回去修。
-- **不要做 force push、close PR、approve / request changes、unresolve thread**。事件型固定用 `COMMENT`。
-- 若 `gh` 未 auth 或無權限 → 不嘗試 workaround，直接報錯誤並提示使用者 `gh auth login`。
-- 若 commit_id 在送出時已過時（PR 在我們準備期間有新 push）→ 重新抓 headRefOid 後再送；body 不變。
-- 處理大檔案 / 多筆 issue 時，所有 `gh api` 呼叫一律 `--paginate`（GraphQL 用 `pageInfo.hasNextPage` 續拉）。
-- JSON payload 用 Write tool 寫到 `{workDir}/`，不要嘗試在 shell 內 echo 大量轉義字串。
-- 環境 `$PATH` 異常時（subshell 找不到 `gh`），用 `command -v gh` 解析出的絕對路徑，不要寫死安裝路徑。
+- **Never modify anything on the PR before submit / resolve** — Phases 1-4 are strictly read-only.
+- **Never submit a review without the user's explicit consent.** Even when `to_post` is empty, explicitly tell the user "nothing new to send" and wait for confirmation.
+- **Never resolve any thread without the user's explicit consent.** In Phase 3, `[FIXED]` / `[WONT-FIX]` verdicts only mean "pre-checked"; the mutation fires only after the user picks "Execute resolve".
+- **Never resolve threads not opened by `authUser`** — this command only handles the user's own old comments; it does not close other people's conversations.
+- **Never resolve threads newly created by this run** (review_id equal to Phase 7's review id).
+- **Never re-run multi-review.** This command only syncs an existing review.md to the PR.
+- **Never edit the local review.md.** If its content looks wrong, tell the user and let them decide whether to go back and fix it.
+- **No force push, no closing the PR, no approve / request changes, no unresolving threads.** The event type is always `COMMENT`.
+- If `gh` is unauthenticated or lacks permission → no workarounds; report the error and point the user at `gh auth login`.
+- If commit_id is stale at submit time (a new push landed while preparing) → re-fetch headRefOid and resend; bodies unchanged.
+- For large files / many issues, always `--paginate` every `gh api` call (GraphQL: follow `pageInfo.hasNextPage`).
+- Write JSON payloads to `{workDir}/` with the Write tool; don't echo large escaped strings in the shell.
+- If `$PATH` is broken (a subshell can't find `gh`), use the absolute path from `command -v gh`; never hardcode an install path.
 
 ---
 
 ## Edge Cases
 
-| 情境 | 處理 |
+| Situation | Handling |
 |------|------|
-| review.md 沒有明確 P0/P1/P2 標記 | 不前綴 priority，但仍按 review 內順序排 |
-| review issue 缺 file:line | 提示使用者該 issue 跳過、列在 skipped 清單，並說明理由 |
-| review issue 的 file 不在 PR diff 內 | 仍嘗試送（GitHub 會以 file-level comment 處理）；若 API 回 422，標為失敗並列出來給使用者 |
-| 同一 review issue 跨多檔 | 拆成多條 inline comment（每檔一條，body 內 cross-link） |
-| PR 已 closed / merged | 警告使用者並問是否仍要送（通常不送） |
-| `to_post` 為空 | 不進入 Phase 5/6 互動迴圈，但仍要先跑 Phase 3 處理舊 thread，最後合併 summary 回報 |
-| 沒有 `authUser` 開啟的 unresolved thread | 跳過 Phase 3，提示「沒有自己開啟的舊 thread 要處理」，直接進 Phase 4 |
-| Phase 3 候選全部 verdict 為 `[未修]` / `[作者異議]` | 仍呈現分類給使用者看，但「執行 Resolve」清單預設為空；除非使用者手動勾選，否則不送 mutation |
-| `resolveReviewThread` mutation 回 `null` / 報錯 | 通常是 thread 已被其他人 resolve、或 thread id 失效（PR 重新 base 後 thread 重生）；列入失敗清單但繼續處理其餘 |
-| review 是另一個 reviewer 寫的（非當前 authUser）| 不影響流程；mention 規則仍依「該被 mention 的 user 是不是 authUser」判斷 |
-| review.md 內有引用其他評論者（如 `@username`） | 若該 username == authUser，改成「我」；否則保留 |
-
+| review.md has no explicit P0/P1/P2 tags | no priority prefix; keep the review's ordering |
+| a review issue lacks file:line | tell the user it's skipped, list it under `skipped` with the reason |
+| a review issue's file is not in the PR diff | still try to send (GitHub falls back to a file-level comment); on API 422, mark it failed and list it |
+| one review issue spans multiple files | split into one inline comment per file, cross-linked in the bodies |
+| the PR is already closed / merged | warn the user and ask whether to send anyway (usually don't) |
+| `to_post` empty | skip the Phase 5/6 loop, but still run Phase 3 for old threads and merge into the final summary |
+| no unresolved threads opened by `authUser` | skip Phase 3, note "no old threads of your own to handle", go straight to Phase 4 |
+| all Phase 3 candidates are `[UNFIXED]` / `[DISPUTED]` | still show the classification, but the "Execute resolve" list defaults to empty; no mutation unless the user opts in |
+| `resolveReviewThread` returns `null` / errors | usually already resolved by someone else, or the thread id died (PR rebased and threads regenerated); add to the failure list and continue |
+| the review was written by another reviewer (not `authUser`) | flow unaffected; the mention rule still keys on whether the mentioned user is authUser |
+| review.md quotes other commenters (`@username`) | if that username == authUser rewrite as 「我」; otherwise keep it |
