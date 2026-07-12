@@ -80,6 +80,9 @@ Division of labor: generic workflows (planning, incremental build, TDD/QA, five-
 /plugin marketplace add addyosmani/agent-skills
 /plugin install agent-skills@addy-agent-skills
 
+# Antigravity CLI (installs to ~/.gemini/antigravity-cli/plugins/agent-skills/)
+agy plugin install https://github.com/addyosmani/agent-skills.git
+
 # Other CLIs (universal skills CLI)
 npx skills add addyosmani/agent-skills
 ```
