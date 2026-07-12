@@ -68,3 +68,18 @@ ln -s ~/.ai-assistant/skills     ~/.agents/skills
 ln -s ~/.ai-assistant/system.md  ~/.copilot/copilot-instructions.md
 ln -s ~/.ai-assistant/skills     ~/.agents/skills  # shared with Codex CLI; skip if already linked
 ```
+
+## Recommended Plugins
+
+[addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) — production-grade engineering skills (plan, build, review, ship, TDD, etc.) that complement the skills in this repo.
+
+Division of labor: generic workflows (planning, incremental build, TDD/QA, five-axis review) are delegated to the plugin. This repo keeps only what the plugin does not cover — pipeline-specific tooling (`multi-review`, `review-to-pr`, `multi-review-verifier`, the `code-reviewer` agent that emits the `.tasks/{currentBranch}/review.md` report format) and deep domain knowledge (`python-code-review`, `sqlalchemy-with-postgresql`, `database-architect`).
+
+```bash
+# Claude Code
+/plugin marketplace add addyosmani/agent-skills
+/plugin install agent-skills@addy-agent-skills
+
+# Other CLIs (universal skills CLI)
+npx skills add addyosmani/agent-skills
+```

@@ -1,6 +1,6 @@
 # Code Quality Principles
 
-Single source of truth for the code-quality priority hierarchy, shared by the `code-writer` / `code-reviewer` agents and the `python-code-review` skill. Evaluate every change in this order:
+Single source of truth for the code-quality priority hierarchy, shared by the `code-reviewer` agent and the `python-code-review` skill. Evaluate every change in this order:
 
 1. **Security & Data Integrity** (Vulnerabilities, race conditions, ACID violations)
 2. **Correctness & Edge Cases** (Logic flaws, off-by-one, state corruption)
