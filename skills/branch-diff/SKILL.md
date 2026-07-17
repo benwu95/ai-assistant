@@ -39,7 +39,6 @@ For every "non-trivial" file in the diff, proactively `Read` its **complete, cur
 
 - new model / migration / router / service files
 - files with more than 50 changed lines
-- AI-knowledge documents (e.g. `prospec/ai-knowledge/`; adjust the path per repo)
 - test files: reading the descriptions is enough; no need to go line by line
 
 If the diff is huge (> 2000 lines), fan out with Agent (Explore subagent) to preserve main context; subagents must likewise read the latest files from disk.
@@ -57,7 +56,6 @@ Bucket every file change into the following layers (emit only sections the branc
 | Cross-module integration | services/orchestrators touching other domains |
 | Validation & constants | `app/validation/*.py`, `app/lib/constants.py` |
 | Database migrations | `migrations/versions/*.py` |
-| AI Knowledge | `prospec/ai-knowledge/**/*.md` |
 | Test coverage | `tests/**/*.py` |
 | Other | config, CI, scripts, etc. |
 
@@ -69,7 +67,7 @@ Write the document to `outputPath` per the Output Template below, creating the d
 
 The output language is **Traditional Chinese (Taiwan)** with technical terms kept in English; follow the terminology table and typography rules in `~/.ai-assistant/shared/taiwan-terminology.md`. Follow the structure and tone below exactly — the template is kept in Chinese verbatim because it IS the output specification.
 
-**Important**: apart from 「改動內容」 and 「設計重點總結」 which are always written, every other section (領域模型, 新 API 端點, Service 層, 跨模組整合, 驗證與常數, 資料庫遷移, AI Knowledge, 測試涵蓋, ...) is **conditional** — produce it only when the branch actually has corresponding changes; otherwise omit the entire section including its heading, leaving no empty shells. For example: when no model was added or modified, there must be no 「## 領域模型」 section. Sections are never numbered; headings are plain text.
+**Important**: apart from 「改動內容」 and 「設計重點總結」 which are always written, every other section (領域模型, 新 API 端點, Service 層, 跨模組整合, 驗證與常數, 資料庫遷移, 測試涵蓋, ...) is **conditional** — produce it only when the branch actually has corresponding changes; otherwise omit the entire section including its heading, leaving no empty shells. For example: when no model was added or modified, there must be no 「## 領域模型」 section. Sections are never numbered; headings are plain text.
 
 ````markdown
 # {currentBranch} 分支變更詳解
@@ -186,13 +184,6 @@ The output language is **Traditional Chinese (Taiwan)** with technical terms kep
 
 ---
 
-## AI Knowledge
-
-`{ai_knowledge_path}` 變更：
-- ...
-
----
-
 ## 測試涵蓋
 
 共 {N} 個新／修改檔：
@@ -220,7 +211,7 @@ The output language is **Traditional Chinese (Taiwan)** with technical terms kep
 - **Focus on design decisions, not line-by-line translation**: explaining "why it changed" beats listing "which lines changed"
 - **Cite concrete paths**: wrap every file, module, and method in backticks
 - **Quantify**: bring in commit counts, file counts, line counts, query counts wherever possible
-- **No auto-dropping sections**: if AI Knowledge / migrations / new models changed, their sections are mandatory; with no changes, omit the whole section
+- **No auto-dropping sections**: if migrations / new models changed, their sections are mandatory; with no changes, omit the whole section
 - **Tables first**: fields, endpoints, SHAs and other structured data go in tables, not long bullet lists
 - **No emotional language** or marketing copy (e.g. 「全面升級」「強大功能」)
 - **Closing 「設計重點總結」**: 3–5 points calling out cross-cutting concerns — mutual exclusion, performance, concurrency, authorization, events
