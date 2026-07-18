@@ -31,43 +31,51 @@ When adding a new skill or command that writes files, follow the same convention
 
 ## Setup
 
-Clone the repo and create a CLI-independent symlink. All agents/skills reference `~/.ai-assistant/shared/`, and each CLI's config symlinks also point through `~/.ai-assistant/` — so moving the repo only requires updating one symlink.
+**Prerequisites:** `git`; on Windows, creating symlinks requires Developer Mode (Settings > Privacy & security > For developers) or running PowerShell as Administrator.
+
+Run the one-liner for your platform. It clones the repo into `~/.ai-assistant` (override with `AI_ASSISTANT_DIR`) and links each installed CLI's config through it:
+
+```bash
+# Unix / macOS
+curl -fsSL https://raw.githubusercontent.com/benwu95/ai-assistant/main/install.sh | bash
+```
+
+```powershell
+# Windows PowerShell
+powershell -c "irm https://raw.githubusercontent.com/benwu95/ai-assistant/main/install.ps1 | iex"
+```
+
+By default it auto-detects installed CLIs. To link every supported CLI (creating config dirs) or only named ones, pass arguments after `-s --`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/benwu95/ai-assistant/main/install.sh | bash -s -- --all
+curl -fsSL https://raw.githubusercontent.com/benwu95/ai-assistant/main/install.sh | bash -s -- claude codex
+```
+
+Supported CLI names: `claude` `antigravity` `codex` `copilot`.
+
+Re-running is safe (idempotent): an existing clone is updated (`git pull --ff-only`), stale symlinks are refreshed, and any existing real file at a link path is backed up to `<name>.bak.<timestamp>` first.
+
+### Already have a local clone?
+
+If you cloned the repo yourself (e.g. to hack on it), run the installer with `--local` (`-Local` on Windows) instead of letting it clone a second copy. This makes `~/.ai-assistant` a symlink pointing at *your* checkout, so your edits are live and relocating the repo later only means repointing that one symlink. Arguments combine as usual:
 
 ```bash
 git clone git@github.com:benwu95/ai-assistant.git ~/workspace/ai-assistant
-ln -s ~/workspace/ai-assistant ~/.ai-assistant
+cd ~/workspace/ai-assistant
+
+# Unix / macOS
+./install.sh --local              # symlink this checkout + auto-detect CLIs
+./install.sh --local --all        # ... + link every supported CLI
+./install.sh --local claude codex # ... + link only the named CLIs
+
+# Windows PowerShell
+.\install.ps1 -Local
+.\install.ps1 -Local -All
+.\install.ps1 -Local claude codex
 ```
 
-### Claude Code
-
-```bash
-ln -s ~/.ai-assistant/system.md  ~/.claude/CLAUDE.md
-ln -s ~/.ai-assistant/agents     ~/.claude/agents
-ln -s ~/.ai-assistant/commands   ~/.claude/commands
-ln -s ~/.ai-assistant/scripts    ~/.claude/scripts
-ln -s ~/.ai-assistant/skills     ~/.claude/skills
-```
-
-### Antigravity CLI
-
-```bash
-ln -s ~/.ai-assistant/system.md  ~/.gemini/GEMINI.md
-ln -s ~/.ai-assistant/skills     ~/.gemini/antigravity-cli/skills
-```
-
-### Codex CLI
-
-```bash
-ln -s ~/.ai-assistant/system.md  ~/.codex/AGENTS.md
-ln -s ~/.ai-assistant/skills     ~/.agents/skills
-```
-
-### Copilot CLI
-
-```bash
-ln -s ~/.ai-assistant/system.md  ~/.copilot/copilot-instructions.md
-ln -s ~/.ai-assistant/skills     ~/.agents/skills  # shared with Codex CLI; skip if already linked
-```
+(Running the installer straight from a checkout — `./install.sh` with no `--local` — links that checkout too; `--local` just makes the intent explicit and refuses to fall back to cloning.)
 
 ## Recommended Plugins
 
