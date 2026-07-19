@@ -25,6 +25,7 @@ All files produced by skills, commands, and the system workflow are stored under
 | `sqlalchemy-with-postgresql` | skill | _(knowledge-only, no file output)_ |
 | `multi-review` | command | `.tasks/{currentBranch}/review.md` + `.tasks/{currentBranch}/review/{timestamp}/` |
 | `review-to-pr` | command | reads `.tasks/{currentBranch}/review-merged.md` / `review.md`; intermediates in `.tasks/{currentBranch}/review-to-pr/` |
+| `agy-search` | command | _(ephemeral temp dir, cleaned up — no persistent output)_ |
 | `system.md` | workflow | `.tasks/{currentBranch}/todo.md`, `.tasks/{currentBranch}/lessons.md` |
 
 When adding a new skill or command that writes files, follow the same convention: resolve `currentBranch` via `git rev-parse --abbrev-ref HEAD` and write to `.tasks/{currentBranch}/<artifact>.md`.
