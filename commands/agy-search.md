@@ -72,7 +72,7 @@ echo "===AGY_EXIT=$STATUS==="
 
 ### Step 4 — Report
 
-- **`AGY_EXIT=0`**: relay agy's findings to the user. It is already conclusion-first and source-attributed (the prefix enforces that) — do **not** rewrite or re-summarize it away; preserve every source name and information date. Prefix your relay with one line naming the engine, e.g. `> 來源：agy（<MODEL>）`. If the answer is thin or sourceless, say so plainly rather than dressing it up. You may add a short cross-check against Claude's own knowledge, clearly separated and labelled as Claude's view vs. Gemini's.
+- **`AGY_EXIT=0`**: relay agy's findings to the user. It is already conclusion-first and source-attributed (the prefix enforces that) — do **not** rewrite or re-summarize it away; preserve every source name, **full URL**, and information date verbatim. Every claim keeps its own URL inline — never collapse them into a shared "see sources" pointer or drop them for brevity. If agy returned a claim with no URL, relay it and mark it unsourced; do not look the URL up yourself, since that would attribute a Claude-found source to Gemini's answer. Prefix your relay with one line naming the engine, e.g. `> 來源：agy（<MODEL>）`. If the answer is thin or sourceless, say so plainly rather than dressing it up. You may add a short cross-check against Claude's own knowledge, clearly separated and labelled as Claude's view vs. Gemini's.
 - **Nonzero exit**: relay the error and act on the likely cause:
   - auth / sign-in expired → have the user re-authenticate the Antigravity CLI (sign in via the Antigravity app / `agy` login flow), then retry.
   - timeout (hit `--print-timeout`) → suggest narrowing the query or rerunning with `Gemini 3.5 Flash (High)`.
@@ -81,7 +81,7 @@ echo "===AGY_EXIT=$STATUS==="
 
 ## Constraints
 
-- **Relay, don't invent**: report only what agy returned. Never fabricate sources or fill gaps from memory to make the answer look complete.
+- **Relay, don't invent**: report only what agy returned. Never fabricate sources or URLs, and never fill gaps from memory to make the answer look complete.
 - **One query per invocation**: for a follow-up, invoke the command again with the refined question. (Interactive `agy --continue` sessions are out of scope.)
 - **Always run from the temp dir** and always `rm -rf` it afterward — never run agy from the project root (project rules would contaminate a pure-research query).
 - **Quota-aware**: each run consumes the user's Gemini subscription quota and may take minutes. Don't invoke it speculatively or loop it.
@@ -102,3 +102,4 @@ echo "===AGY_EXIT=$STATUS==="
 | user names an unknown model | Caught at Step 1 preflight (`agy models`); show valid names; confirm before running. |
 | default model missing from `agy models` (lineup changed) | Pick the closest Gemini Pro tier from the list; tell the user; continue. |
 | agy returns an empty / low-signal answer | Say so directly; suggest reframing the query or trying Claude's own tools. |
+| agy returns claims without URLs | Relay them and mark those claims unsourced; never backfill URLs from memory or your own search. |
