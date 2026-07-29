@@ -1,5 +1,5 @@
 ---
-description: Run a headless web-research query through the Antigravity CLI (`agy` → Gemini) as a second search engine — for when Claude's own WebSearch/WebFetch is blocked by anti-bot / Cloudflare walls, or when you want an independent engine to cross-verify a finding. Applies a research-method prefix and runs from a clean temp dir so project-local rules don't contaminate the query. Triggers: agy search, 用 agy 查, Gemini search / Gemini 搜尋, second search engine / 第二搜尋引擎, second opinion, cross-verify / 交叉驗證, anti-bot / Cloudflare blocked, 搜尋被擋 / 搜不到, search the web, 上網搜尋, 查資料, look up, latest / 最新, docs, research.
+description: "Run a headless web-research query through the Antigravity CLI (`agy` → Gemini) as a second search engine — for when Claude's own WebSearch/WebFetch is blocked by anti-bot / Cloudflare walls, or when you want an independent engine to cross-verify a finding. Applies a research-method prefix and runs from a clean temp dir so project-local rules don't contaminate the query. Triggers: agy search, 用 agy 查, Gemini search / Gemini 搜尋, second search engine / 第二搜尋引擎, second opinion, cross-verify / 交叉驗證, anti-bot / Cloudflare blocked, 搜尋被擋 / 搜不到, search the web, 上網搜尋, 查資料, look up, latest / 最新, docs, research."
 argument-hint: <research question> [name a model, e.g. "use Flash"]
 allowed-tools: Bash, Write
 ---

@@ -1,6 +1,6 @@
 ---
 description: Iterative code review loop — Claude reviewer (python-code-review skill) ↔ Claude verifier (multi-review-verifier agent), driven entirely inside the Claude Code session (no programmatic billing)
-argument-hint: [base_branch=main] [max_iter=3] [reviewer_model=opus|sonnet|haiku] [verifier_model=opus|sonnet|haiku]
+argument-hint: "[base_branch=main] [max_iter=3] [reviewer_model=opus|sonnet|haiku] [verifier_model=opus|sonnet|haiku]"
 allowed-tools: Agent, Read, Bash, Write
 ---
 
