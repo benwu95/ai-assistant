@@ -4,6 +4,8 @@ argument-hint: [base_branch=main] [max_iter=3] [reviewer_model=opus|sonnet|haiku
 allowed-tools: Agent, Read, Bash, Write
 ---
 
+# Multi-Review
+
 Run an interactive code review loop between Claude agents. **The loop is driven directly at the command level (main session)**: each round spawns an independent reviewer and verifier sub-agent, and the whole review flow counts toward subscription usage. All Chinese output follows the terminology table and typography rules in `~/.ai-assistant/shared/taiwan-terminology.md`.
 
 Each round spawns two sub-agents:
