@@ -88,15 +88,19 @@ esac
 model_lower=$(echo "$model" | tr '[:upper:]' '[:lower:]')
 quota_key="gemini-5h"
 weekly_quota_key="gemini-weekly"
-if [[ "$model_lower" == *"claude"* ]] || [[ "$model_lower" == *"fable"* ]] || [[ "$model_lower" == *"mythos"* ]] || [[ "$model_lower" == *"opus"* ]] || [[ "$model_lower" == *"sonnet"* ]] || [[ "$model_lower" == *"haiku"* ]]; then
+
+# If model is not Gemini, or matches third-party keywords, use 3P quota keys
+if [[ "$model_lower" != *"gemini"* ]] || [[ "$model_lower" == *"claude"* ]] || [[ "$model_lower" == *"fable"* ]] || [[ "$model_lower" == *"mythos"* ]] || [[ "$model_lower" == *"opus"* ]] || [[ "$model_lower" == *"sonnet"* ]] || [[ "$model_lower" == *"haiku"* ]]; then
   quota_key="3p-5h"
   weekly_quota_key="3p-weekly"
 fi
 
-remaining_fraction=$(echo "$payload" | jq -r ".quota[\"${quota_key}\"].remaining_fraction // \"\"")
-reset_in_seconds=$(echo "$payload" | jq -r ".quota[\"${quota_key}\"].reset_in_seconds // \"\"")
-weekly_remaining_fraction=$(echo "$payload" | jq -r ".quota[\"${weekly_quota_key}\"].remaining_fraction // \"\"")
-weekly_reset_in_seconds=$(echo "$payload" | jq -r ".quota[\"${weekly_quota_key}\"].reset_in_seconds // \"\"")
+# Extract remaining fraction & reset time with fallbacks for key names and camelCase vs snake_case
+remaining_fraction=$(echo "$payload" | jq -r ".quota[\"${quota_key}\"].remaining_fraction // .quota[\"${quota_key}\"].remainingFraction // .quota[\"3p-5h\"].remaining_fraction // .quota[\"3p-5h\"].remainingFraction // .quota[\"gemini-5h\"].remaining_fraction // .quota[\"gemini-5h\"].remainingFraction // \"\"")
+reset_in_seconds=$(echo "$payload" | jq -r ".quota[\"${quota_key}\"].reset_in_seconds // .quota[\"${quota_key}\"].resetInSeconds // .quota[\"${quota_key}\"].resets_at // .quota[\"3p-5h\"].reset_in_seconds // .quota[\"3p-5h\"].resetInSeconds // \"\"")
+
+weekly_remaining_fraction=$(echo "$payload" | jq -r ".quota[\"${weekly_quota_key}\"].remaining_fraction // .quota[\"${weekly_quota_key}\"].remainingFraction // .quota[\"3p-weekly\"].remaining_fraction // .quota[\"3p-weekly\"].remainingFraction // .quota[\"gemini-weekly\"].remaining_fraction // .quota[\"gemini-weekly\"].remainingFraction // \"\"")
+weekly_reset_in_seconds=$(echo "$payload" | jq -r ".quota[\"${weekly_quota_key}\"].reset_in_seconds // .quota[\"${weekly_quota_key}\"].resetInSeconds // .quota[\"${weekly_quota_key}\"].resets_at // .quota[\"3p-weekly\"].reset_in_seconds // .quota[\"3p-weekly\"].resetInSeconds // \"\"")
 
 format_reset_time() {
   local val=$1
@@ -112,6 +116,9 @@ format_reset_time() {
     if [ "${#val}" -eq 13 ]; then
       sec=$((val / 1000))
     fi
+    if [ "$sec" -lt 31536000 ]; then
+      sec=$(( $(date +%s) + sec ))
+    fi
     date -r "$sec" "+%H:%M" 2>/dev/null || date -d "@$sec" "+%H:%M" 2>/dev/null || echo "$sec"
   else
     echo "$val"
@@ -121,23 +128,13 @@ format_reset_time() {
 usage_fmt=""
 if [ -n "$remaining_fraction" ] && [ "$remaining_fraction" != "null" ] && [ "$remaining_fraction" != "" ]; then
   used_val=$(awk -v r="$remaining_fraction" 'BEGIN { printf "%.1f%%", (1 - r) * 100 }' 2>/dev/null || echo "0.0%")
-  reset_fmt=""
-  if [ -n "$reset_in_seconds" ] && [ "$reset_in_seconds" != "null" ] && [ "$reset_in_seconds" -gt 0 ] 2>/dev/null; then
-    current_epoch=$(date +%s)
-    reset_epoch=$((current_epoch + reset_in_seconds))
-    reset_fmt=$(date -r "$reset_epoch" "+%H:%M" 2>/dev/null || date -d "@$reset_epoch" "+%H:%M" 2>/dev/null || echo "")
-  fi
+  reset_fmt=$(format_reset_time "$reset_in_seconds")
   
   weekly_used_val=""
   weekly_reset_fmt=""
   if [ -n "$weekly_remaining_fraction" ] && [ "$weekly_remaining_fraction" != "null" ] && [ "$weekly_remaining_fraction" != "" ]; then
     weekly_used_val=$(awk -v r="$weekly_remaining_fraction" 'BEGIN { printf "%.1f%%", (1 - r) * 100 }' 2>/dev/null || echo "0.0%")
-    
-    if [ -n "$weekly_reset_in_seconds" ] && [ "$weekly_reset_in_seconds" != "null" ] && [ "$weekly_reset_in_seconds" -gt 0 ] 2>/dev/null; then
-      current_epoch=$(date +%s)
-      weekly_reset_epoch=$((current_epoch + weekly_reset_in_seconds))
-      weekly_reset_fmt=$(date -r "$weekly_reset_epoch" "+%m/%d %H:%M" 2>/dev/null || date -d "@$weekly_reset_epoch" "+%m/%d %H:%M" 2>/dev/null || echo "")
-    fi
+    weekly_reset_fmt=$(format_reset_time "$weekly_reset_in_seconds")
   fi
   
   usage_fmt="${COLOR_LABEL}5h: ${COLOR_RESET}${COLOR_USAGE}${used_val}${COLOR_RESET}"
