@@ -69,13 +69,18 @@ format_number() {
 
 format_reset_time() {
   local val=$1
+  local include_date=$2
   if [ -z "$val" ] || [ "$val" = "null" ] || [ "$val" = "" ]; then
     echo ""
     return
   fi
   if [[ "$val" == *"T"* ]]; then
+    local date_part=""
+    if [ "$include_date" = "true" ]; then
+      date_part="$(echo "$val" | cut -d'T' -f1 | cut -d'-' -f2,3 | tr '-' '/') "
+    fi
     local time_part="${val#*T}"
-    echo "${time_part:0:5}"
+    echo "${date_part}${time_part:0:5}"
   elif [[ "$val" =~ ^[0-9]+$ ]]; then
     local sec=$val
     if [ "${#val}" -eq 13 ]; then
@@ -84,7 +89,11 @@ format_reset_time() {
     if [ "$sec" -lt 31536000 ]; then
       sec=$(( $(date +%s) + sec ))
     fi
-    date -r "$sec" "+%H:%M" 2>/dev/null || date -d "@$sec" "+%H:%M" 2>/dev/null || echo "$sec"
+    local fmt="+%H:%M"
+    if [ "$include_date" = "true" ]; then
+      fmt="+%m/%d %H:%M"
+    fi
+    date -r "$sec" "$fmt" 2>/dev/null || date -d "@$sec" "$fmt" 2>/dev/null || echo "$sec"
   else
     echo "$val"
   fi
@@ -144,7 +153,7 @@ if [ -n "$remaining_fraction" ] && [ "$remaining_fraction" != "null" ]; then
   weekly_reset_fmt=""
   if [ -n "$weekly_remaining_fraction" ] && [ "$weekly_remaining_fraction" != "null" ]; then
     weekly_used_val=$(awk -v r="$weekly_remaining_fraction" 'BEGIN { printf "%.1f%%", (1 - r) * 100 }' 2>/dev/null || echo "0.0%")
-    weekly_reset_fmt=$(format_reset_time "$weekly_reset_in_seconds")
+    weekly_reset_fmt=$(format_reset_time "$weekly_reset_in_seconds" "true")
   fi
 
   usage_fmt="${COLOR_LABEL}5h: ${COLOR_RESET}${COLOR_USAGE}${used_val}${COLOR_RESET}"
@@ -166,20 +175,7 @@ elif [ -n "$rate_limits_used" ] && [ "$rate_limits_used" != "null" ]; then
   weekly_reset_fmt=""
   if [ -n "$rate_limits_weekly_used" ] && [ "$rate_limits_weekly_used" != "null" ]; then
     weekly_used_val=$(awk -v p="$rate_limits_weekly_used" 'BEGIN { printf "%.1f%%", p }' 2>/dev/null || echo "${rate_limits_weekly_used}%")
-
-    if [ -n "$rate_limits_weekly_reset" ] && [ "$rate_limits_weekly_reset" != "null" ]; then
-      if [[ "$rate_limits_weekly_reset" == *"T"* ]]; then
-        date_part=$(echo "$rate_limits_weekly_reset" | cut -d'T' -f1 | cut -d'-' -f2,3 | tr '-' '/')
-        time_part=$(echo "$rate_limits_weekly_reset" | cut -d'T' -f2 | cut -d':' -f1,2)
-        weekly_reset_fmt="${date_part} ${time_part}"
-      elif [[ "$rate_limits_weekly_reset" =~ ^[0-9]+$ ]]; then
-        sec=$rate_limits_weekly_reset
-        if [ "${#rate_limits_weekly_reset}" -eq 13 ]; then
-          sec=$((rate_limits_weekly_reset / 1000))
-        fi
-        weekly_reset_fmt=$(date -r "$sec" "+%m/%d %H:%M" 2>/dev/null || date -d "@$sec" "+%m/%d %H:%M" 2>/dev/null || echo "")
-      fi
-    fi
+    weekly_reset_fmt=$(format_reset_time "$rate_limits_weekly_reset" "true")
   fi
 
   usage_fmt="${COLOR_LABEL}5h: ${COLOR_RESET}${COLOR_USAGE}${used_val}${COLOR_RESET}"
