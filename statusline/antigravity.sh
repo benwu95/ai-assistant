@@ -22,8 +22,8 @@ eval "$(echo "$payload" | jq -r '
   "model=" + ($m | @sh) + "\n" +
   "subagents_count=" + ((if .subagents | type == "array" then .subagents | length else 0 end) | tostring | @sh) + "\n" +
   "sandbox_val=" + ((.sandbox // .terminal_sandbox // .enableTerminalSandbox // "false") | tostring | @sh) + "\n" +
-  "tokens_in=" + ((.tokens.input // .context_window.total_input_tokens // .tokens_in // 0) | tostring | @sh) + "\n" +
-  "tokens_out=" + ((.tokens.output // .context_window.total_output_tokens // .tokens_out // 0) | tostring | @sh) + "\n" +
+  "tokens_in=" + ((.context_window.current_usage.input_tokens // .context_window.total_input_tokens // .tokens.input // .tokens_in // .usage.input_tokens // 0) | tostring | @sh) + "\n" +
+  "tokens_out=" + ((.context_window.current_usage.output_tokens // .context_window.total_output_tokens // .tokens.output // .tokens_out // .usage.output_tokens // 0) | tostring | @sh) + "\n" +
   "tokens_cached=" + ((.tokens.cached // .tokens.cache_read // .context_window.current_usage.cache_read_input_tokens // .context_window.cache_read_input_tokens // .tokens.cached_content // 0) | tostring | @sh) + "\n" +
   "tokens_thinking=" + ((.tokens.thinking // .tokens.reasoning // .context_window.current_usage.thinking_output_tokens // .context_window.thinking_output_tokens // 0) | tostring | @sh) + "\n" +
   "credits_rem=" + ((.credits.remaining // .credits // .cost.total_cost_usd // "") | tostring | @sh) + "\n" +
@@ -35,7 +35,7 @@ eval "$(echo "$payload" | jq -r '
   "rate_limits_reset=" + ((.rate_limits.five_hour.resets_at // "") | tostring | @sh) + "\n" +
   "rate_limits_weekly_used=" + ((.rate_limits.seven_day.used_percentage // "") | tostring | @sh) + "\n" +
   "rate_limits_weekly_reset=" + ((.rate_limits.seven_day.resets_at // "") | tostring | @sh) + "\n" +
-  "used_pct=" + ((.context_window.used_percentage // "") | tostring | @sh) + "\n" +
+  "used_pct=" + ((.context_window.used_percentage // .context_window.current_usage.used_percentage // .used_percentage // "") | tostring | @sh) + "\n" +
   "cli_version=" + ((.version // "") | tostring | @sh) + "\n" +
   "cycle_mode=" + ((.cycle_mode // .agent_mode // .mode // "default") | tostring | @sh)
 ' 2>/dev/null)"
