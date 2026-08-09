@@ -323,7 +323,7 @@ def print_table(
     compact: bool = False,
     show_breakdown: bool = False
 ):
-    """Print ASCII report table."""
+    """Print Markdown report table."""
     if not grouped:
         print("No usage data found.")
         return
@@ -336,16 +336,18 @@ def print_table(
     elif mode == "session":
         period_label = "Session ID"
 
-    print(f"\n📊 Token Usage Report ({mode.upper()}) [Context Window Prefill Included]")
-    print("=" * (90 if show_cost else 75))
+    print(f"\n### 📊 Token Usage Report ({mode.upper()})")
+    print("*Context Window Prefill Included*\n")
 
     if show_cost:
-        header = f"{period_label:<14} | {'Models':<24} | {'Input':<10} | {'Cached':<10} | {'Output':<10} | {'Total':<11} | {'Cost ($)':<9}"
+        header = f"| {period_label:<14} | {'Models':<24} | {'Input':<10} | {'Cached':<10} | {'Output':<10} | {'Total':<11} | {'Cost ($)':<9} |"
+        separator = f"| {'-'*14} | {'-'*24} | {'-'*10} | {'-'*10} | {'-'*10} | {'-'*11} | {'-'*9} |"
     else:
-        header = f"{period_label:<14} | {'Models':<24} | {'Input':<10} | {'Cached':<10} | {'Output':<10} | {'Total':<11}"
+        header = f"| {period_label:<14} | {'Models':<24} | {'Input':<10} | {'Cached':<10} | {'Output':<10} | {'Total':<11} |"
+        separator = f"| {'-'*14} | {'-'*24} | {'-'*10} | {'-'*10} | {'-'*10} | {'-'*11} |"
 
     print(header)
-    print("-" * len(header))
+    print(separator)
 
     tot_net_in = 0
     tot_cached_in = 0
@@ -374,9 +376,9 @@ def print_table(
         tot_cost += grp["cost"]
 
         if show_cost:
-            print(f"{grp['period']:<14} | {models_str:<24} | {net_in:>10} | {cached_in:>10} | {out:>10} | {total:>11} | {cost_str:>9}")
+            print(f"| {grp['period']:<14} | {models_str:<24} | {net_in:>10} | {cached_in:>10} | {out:>10} | {total:>11} | {cost_str:>9} |")
         else:
-            print(f"{grp['period']:<14} | {models_str:<24} | {net_in:>10} | {cached_in:>10} | {out:>10} | {total:>11}")
+            print(f"| {grp['period']:<14} | {models_str:<24} | {net_in:>10} | {cached_in:>10} | {out:>10} | {total:>11} |")
 
         if show_breakdown and len(grp["breakdown"]) > 1:
             for m_name, m_data in grp["breakdown"].items():
@@ -386,11 +388,10 @@ def print_table(
                 m_tot = format_number(m_data["total_tokens"])
                 m_cost = format_currency(m_data["cost"])
                 if show_cost:
-                    print(f"  └─ {m_name:<21} | {m_net:>10} | {m_cached:>10} | {m_out:>10} | {m_tot:>11} | {m_cost:>9}")
+                    print(f"| {'':<14} | └─ {m_name:<21} | {m_net:>10} | {m_cached:>10} | {m_out:>10} | {m_tot:>11} | {m_cost:>9} |")
                 else:
-                    print(f"  └─ {m_name:<21} | {m_net:>10} | {m_cached:>10} | {m_out:>10} | {m_tot:>11}")
+                    print(f"| {'':<14} | └─ {m_name:<21} | {m_net:>10} | {m_cached:>10} | {m_out:>10} | {m_tot:>11} |")
 
-    print("=" * len(header))
     tot_net_in_str = format_number(tot_net_in)
     tot_cached_in_str = format_number(tot_cached_in)
     tot_out_str = format_number(tot_out)
@@ -398,9 +399,9 @@ def print_table(
     tot_cost_str = format_currency(tot_cost)
 
     if show_cost:
-        print(f"{'Total':<14} | {'-':<24} | {tot_net_in_str:>10} | {tot_cached_in_str:>10} | {tot_out_str:>10} | {tot_total_str:>11} | {tot_cost_str:>9}\n")
+        print(f"| **Total** | - | **{tot_net_in_str}** | **{tot_cached_in_str}** | **{tot_out_str}** | **{tot_total_str}** | **{tot_cost_str}** |\n")
     else:
-        print(f"{'Total':<14} | {'-':<24} | {tot_net_in_str:>10} | {tot_cached_in_str:>10} | {tot_out_str:>10} | {tot_total_str:>11}\n")
+        print(f"| **Total** | - | **{tot_net_in_str}** | **{tot_cached_in_str}** | **{tot_out_str}** | **{tot_total_str}** |\n")
 
 
 def main():
