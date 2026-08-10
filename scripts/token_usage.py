@@ -137,9 +137,12 @@ def parse_antigravity_brain_transcripts(home_dir: str) -> List[TokenEntry]:
                     for row in cursor.fetchall():
                         blob = row[0]
                         if blob and b"gemini" in blob.lower():
-                            m = re.search(rb"(gemini-[a-zA-Z0-9\.\-]+)", blob, re.IGNORECASE)
-                            if m:
-                                model_name = m.group(1).decode("utf-8", errors="ignore")
+                            matches = re.findall(rb"(gemini-[a-zA-Z0-9\.\-]+|gemini\s+[a-zA-Z0-9\.\-]+\s+[a-zA-Z]+)", blob, re.IGNORECASE)
+                            if matches:
+                                raw_name = matches[-1].decode("utf-8", errors="ignore").strip()
+                                norm_name = re.sub(r'\s*\([^)]*\)', '', raw_name).strip()
+                                norm_name = re.sub(r'\s+', '-', norm_name).lower()
+                                model_name = norm_name
                                 break
                 conn.close()
             except Exception:
