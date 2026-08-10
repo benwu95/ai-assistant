@@ -22,7 +22,10 @@ All Chinese output MUST follow the terminology table and typography rules in `~/
   - `--last N`: Limit output to the last N periods (e.g. `--last 1` for today / this week).
   - `--json`: Format output as JSON data.
   - `--no-cost`: Omit USD cost calculation columns.
-  - `--breakdown`: Include per-model breakdown rows.
+  - `--by-model`: Aggregate the whole window into one per-model table (`Model | Input | Cache | Output | Total | Cost`) instead of per-period rows. Rows sort by cost, or by total tokens with `--no-cost`.
+  - `--compact`: Collapse each period to a single aggregate row instead of one row per model.
+
+The default report prints one row per model within each period — `Date | Model | Input | Cache | Output | Total | Cost`, where `Cache` sums CacheWrite and CacheRead — with the period label shown once on its first model row.
 
 ---
 

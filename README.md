@@ -41,16 +41,19 @@ The `token-usage` skill calculates and aggregates token usage and estimated cost
 - `/token-usage` (defaults to daily aggregation for all sources)
 - `/token-usage since 2026-07-01`
 - `/token-usage weekly --source claude`
-- `/token-usage monthly --last 3 --breakdown`
+- `/token-usage monthly --last 3 --by-model`
 
 **Available Options:**
 - **Aggregation mode**: `daily` (default), `weekly`, `monthly`, or `session`
 - `--source <name>`: Filter by source (`antigravity`, `claude`, `codex`, `copilot`, `all`)
 - `--since YYYY-MM-DD` / `--until YYYY-MM-DD`: Filter by date range
 - `--last N`: Limit output to the last N periods
-- `--breakdown`: Include per-model breakdown rows
+- `--by-model`: Aggregate the whole window into one per-model table instead of per-period rows
+- `--compact`: Collapse each period to a single aggregate row instead of one row per model
 - `--no-cost`: Omit USD cost calculation
 - `--json`: Output raw JSON data
+
+The default report prints one row per model within each period — `Date | Model | Input | Cache | Output | Total | Cost`, where `Cache` sums CacheWrite and CacheRead — with the period label shown once on its first model row.
 
 *(Note: Pricing rates are configured in `shared/token-pricing.json`.)*
 ## Setup

@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from token_usage import (
     TokenEntry,
     group_entries,
-    filter_entries
+    filter_entries,
+    aggregate_by_model
 )
 
 class TestTokenUsage(unittest.TestCase):
@@ -77,12 +78,59 @@ class TestTokenUsage(unittest.TestCase):
 
         grouped = group_entries([entry1, entry2], mode="daily")
         self.assertEqual(len(grouped), 1)
-        today_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        self.assertIn(today_key, grouped)
-        grp = grouped[today_key]
+        expected_key = entry1.timestamp.astimezone().strftime("%Y-%m-%d")
+        self.assertIn(expected_key, grouped)
+        grp = grouped[expected_key]
         self.assertEqual(grp["net_input"], 4000 + 2000)
         self.assertEqual(grp["cached_input"], 1000)
         self.assertEqual(grp["output"], 500 + 200)
+
+    def test_aggregate_by_model_merges_periods(self):
+        e1 = TokenEntry(
+            timestamp=datetime(2026, 8, 6, 10, 0, tzinfo=timezone.utc),
+            session_id="s1",
+            model="claude-opus-5",
+            raw_input=1000,
+            cached_input=4000,
+            output=100,
+            cache_write=500,
+            input_is_net=True
+        )
+        e2 = TokenEntry(
+            timestamp=datetime(2026, 8, 8, 10, 0, tzinfo=timezone.utc),
+            session_id="s2",
+            model="claude-opus-5",
+            raw_input=2000,
+            cached_input=6000,
+            output=200,
+            cache_write=300,
+            input_is_net=True
+        )
+        e3 = TokenEntry(
+            timestamp=datetime(2026, 8, 8, 11, 0, tzinfo=timezone.utc),
+            session_id="s3",
+            model="gemini-3.6-flash",
+            raw_input=5000,
+            cached_input=0,
+            output=50
+        )
+
+        grouped = group_entries([e1, e2, e3], mode="daily")
+        self.assertEqual(len(grouped), 2)
+
+        totals = aggregate_by_model(grouped)
+        self.assertEqual(set(totals.keys()), {"claude-opus-5", "gemini-3.6-flash"})
+
+        opus = totals["claude-opus-5"]
+        self.assertEqual(opus["net_input"], 3000)
+        self.assertEqual(opus["cached_input"], 10000)
+        self.assertEqual(opus["cache_write"], 800)
+        self.assertEqual(opus["output"], 300)
+        self.assertEqual(opus["total_tokens"], e1.total_tokens + e2.total_tokens)
+
+        # Aggregate cost must equal the sum of the per-period buckets it merged.
+        period_cost = sum(grp["cost"] for grp in grouped.values())
+        self.assertAlmostEqual(sum(v["cost"] for v in totals.values()), period_cost, places=9)
 
     def test_filter_entries_by_date(self):
         e1 = TokenEntry(

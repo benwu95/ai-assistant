@@ -524,6 +524,29 @@ def group_entries(
     return grouped
 
 
+def aggregate_by_model(grouped: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Merge the per-period model breakdowns into a single model-keyed aggregate."""
+    totals: Dict[str, Dict[str, Any]] = {}
+
+    for grp in grouped.values():
+        for m_name, m_data in grp["breakdown"].items():
+            if m_name not in totals:
+                totals[m_name] = {
+                    "net_input": 0,
+                    "cache_write": 0,
+                    "cached_input": 0,
+                    "output": 0,
+                    "thoughts": 0,
+                    "total_tokens": 0,
+                    "cost": 0.0
+                }
+            agg = totals[m_name]
+            for field in ("net_input", "cache_write", "cached_input", "output", "thoughts", "total_tokens", "cost"):
+                agg[field] += m_data[field]
+
+    return totals
+
+
 def filter_entries(
     entries: List[TokenEntry],
     since: Optional[str] = None,
@@ -552,14 +575,40 @@ def filter_entries(
     return filtered
 
 
+PERIOD_COL_WIDTHS = (14, 24, 13, 15, 12, 15, 11)
+MODEL_COL_WIDTHS = (24, 13, 15, 12, 15, 11)
+
+
+def md_row(cells: List[str], widths: Tuple[int, ...], left_align: int) -> str:
+    """Render one Markdown row: the first `left_align` cells are left-aligned, the rest right-aligned."""
+    parts = [
+        f"{cell:<{w}}" if i < left_align else f"{cell:>{w}}"
+        for i, (cell, w) in enumerate(zip(cells, widths))
+    ]
+    return "| " + " | ".join(parts) + " |"
+
+
+def md_separator(widths: Tuple[int, ...]) -> str:
+    return "| " + " | ".join("-" * w for w in widths) + " |"
+
+
+def md_total_row(cells: List[str]) -> str:
+    return "| **Total** | " + " | ".join(f"**{c}**" for c in cells) + " |"
+
+
+def sort_models(breakdown: Dict[str, Dict[str, Any]], show_cost: bool) -> List[Tuple[str, Dict[str, Any]]]:
+    """Order models by what the report is about: cost, or raw volume when cost is hidden."""
+    key = (lambda item: item[1]["cost"]) if show_cost else (lambda item: item[1]["total_tokens"])
+    return sorted(breakdown.items(), key=key, reverse=True)
+
+
 def print_table(
     grouped: Dict[str, Dict[str, Any]],
     mode: str,
     show_cost: bool = True,
-    compact: bool = False,
-    show_breakdown: bool = False
+    compact: bool = False
 ):
-    """Print Markdown report table."""
+    """Print Markdown report table, one row per model within each period."""
     if not grouped:
         print("No usage data found.")
         return
@@ -572,108 +621,113 @@ def print_table(
     elif mode == "session":
         period_label = "Session ID"
 
+    widths = PERIOD_COL_WIDTHS if show_cost else PERIOD_COL_WIDTHS[:-1]
+
     print(f"\n### 📊 Token Usage Report ({mode.upper()})")
-    print("*Context Window Prefill Included*\n")
+    print("*Context Window Prefill Included · Cache = CacheWrite + CacheRead*\n")
 
-    if show_cost:
-        header = f"| {period_label:<14} | {'Models':<24} | {'Input':<10} | {'CacheWrite':<10} | {'CacheRead':<11} | {'Output':<10} | {'Total':<11} | {'Cost ($)':<9} |"
-        separator = f"| {'-'*14} | {'-'*24} | {'-'*10} | {'-'*10} | {'-'*11} | {'-'*10} | {'-'*11} | {'-'*9} |"
-    else:
-        header = f"| {period_label:<14} | {'Models':<24} | {'Input':<10} | {'CacheWrite':<10} | {'CacheRead':<11} | {'Output':<10} | {'Total':<11} |"
-        separator = f"| {'-'*14} | {'-'*24} | {'-'*10} | {'-'*10} | {'-'*11} | {'-'*10} | {'-'*11} |"
-
-    print(header)
-    print(separator)
+    header = [period_label, "Model", "Input", "Cache", "Output", "Total", "Cost ($)"]
+    print(md_row(header[:len(widths)], widths, left_align=2))
+    print(md_separator(widths))
 
     tot_net_in = 0
-    tot_cache_write = 0
-    tot_cached_in = 0
+    tot_cache = 0
     tot_out = 0
     tot_total = 0
     tot_cost = 0.0
 
-    sorted_keys = sorted(grouped.keys())
-
-    for k in sorted_keys:
+    for k in sorted(grouped.keys()):
         grp = grouped[k]
-        
-        models_list = sorted(grp["models"])
-        providers = {}
-        for m in models_list:
-            m_lower = m.lower()
-            if m_lower.startswith("gemini"):
-                p = "gemini"
-            elif m_lower.startswith("claude"):
-                p = "claude"
-            elif m_lower.startswith("gpt") or m_lower.startswith("o1"):
-                p = "openai"
-            elif m_lower == "<synthetic>":
-                p = "system"
-            else:
-                p = "other"
-            if p not in providers:
-                providers[p] = []
-            providers[p].append(m)
-
-        model_lines = []
-        for p in sorted(providers.keys()):
-            model_lines.append(p)
-            for m in providers[p]:
-                model_lines.append(f"  - {m}")
-                    
-        if compact and len(model_lines) > 5:
-            model_lines = [f"{len(models_list)} models"]
-
-        net_in = format_number(grp["net_input"])
-        cache_w = format_number(grp["cache_write"])
-        cached_in = format_number(grp["cached_input"])
-        out = format_number(grp["output"] + grp["thoughts"])
-        total = format_number(grp["total_tokens"])
-        cost_str = format_currency(grp["cost"])
 
         tot_net_in += grp["net_input"]
-        tot_cache_write += grp["cache_write"]
-        tot_cached_in += grp["cached_input"]
-        tot_out += (grp["output"] + grp["thoughts"])
+        tot_cache += grp["cache_write"] + grp["cached_input"]
+        tot_out += grp["output"] + grp["thoughts"]
         tot_total += grp["total_tokens"]
         tot_cost += grp["cost"]
 
-        first_model = model_lines[0] if model_lines else ""
-        if show_cost:
-            print(f"| {grp['period']:<14} | {first_model:<24} | {net_in:>10} | {cache_w:>10} | {cached_in:>11} | {out:>10} | {total:>11} | {cost_str:>9} |")
+        if compact:
+            models_list = sorted(grp["models"])
+            label = models_list[0] if len(models_list) == 1 else f"{len(models_list)} models"
+            rows = [(label, grp)]
         else:
-            print(f"| {grp['period']:<14} | {first_model:<24} | {net_in:>10} | {cache_w:>10} | {cached_in:>11} | {out:>10} | {total:>11} |")
+            rows = sort_models(grp["breakdown"], show_cost)
 
-        for line in model_lines[1:]:
-            if show_cost:
-                print(f"| {'':<14} | {line:<24} | {'':>10} | {'':>10} | {'':>11} | {'':>10} | {'':>11} | {'':>9} |")
-            else:
-                print(f"| {'':<14} | {line:<24} | {'':>10} | {'':>10} | {'':>11} | {'':>10} | {'':>11} |")
+        for idx, (m_name, m_data) in enumerate(rows):
+            cells = [
+                grp["period"] if idx == 0 else "",
+                m_name,
+                format_number(m_data["net_input"]),
+                format_number(m_data["cache_write"] + m_data["cached_input"]),
+                format_number(m_data["output"] + m_data["thoughts"]),
+                format_number(m_data["total_tokens"]),
+                format_currency(m_data["cost"]),
+            ]
+            print(md_row(cells[:len(widths)], widths, left_align=2))
 
-        if show_breakdown and len(grp["breakdown"]) > 1:
-            for m_name, m_data in grp["breakdown"].items():
-                m_net = format_number(m_data["net_input"])
-                m_write = format_number(m_data["cache_write"])
-                m_cached = format_number(m_data["cached_input"])
-                m_out = format_number(m_data["output"] + m_data["thoughts"])
-                m_tot = format_number(m_data["total_tokens"])
-                m_cost = format_currency(m_data["cost"])
-                if show_cost:
-                    print(f"| {'':<14} | └─ {m_name:<21} | {m_net:>10} | {m_write:>10} | {m_cached:>11} | {m_out:>10} | {m_tot:>11} | {m_cost:>9} |")
-                else:
-                    print(f"| {'':<14} | └─ {m_name:<21} | {m_net:>10} | {m_write:>10} | {m_cached:>11} | {m_out:>10} | {m_tot:>11} |")
+    totals = [
+        "-",
+        format_number(tot_net_in),
+        format_number(tot_cache),
+        format_number(tot_out),
+        format_number(tot_total),
+        format_currency(tot_cost),
+    ]
+    print(md_total_row(totals[:len(widths) - 1]) + "\n")
 
-    tot_net_in_str = format_number(tot_net_in)
-    tot_cache_write_str = format_number(tot_cache_write)
-    tot_cached_in_str = format_number(tot_cached_in)
-    tot_out_str = format_number(tot_out)
-    tot_total_str = format_number(tot_total)
-    tot_cost_str = format_currency(tot_cost)
 
-    if show_cost:
-        print(f"| **Total** | - | **{tot_net_in_str}** | **{tot_cache_write_str}** | **{tot_cached_in_str}** | **{tot_out_str}** | **{tot_total_str}** | **{tot_cost_str}** |\n")
-    else:
-        print(f"| **Total** | - | **{tot_net_in_str}** | **{tot_cache_write_str}** | **{tot_cached_in_str}** | **{tot_out_str}** | **{tot_total_str}** |\n")
+def print_model_table(
+    grouped: Dict[str, Dict[str, Any]],
+    mode: str,
+    show_cost: bool = True
+):
+    """Print Markdown report table aggregated per model across the whole window."""
+    model_totals = aggregate_by_model(grouped)
+    if not model_totals:
+        print("No usage data found.")
+        return
+
+    periods = sorted(grouped.keys())
+    span = periods[0] if len(periods) == 1 else f"{periods[0]} → {periods[-1]}"
+    widths = MODEL_COL_WIDTHS if show_cost else MODEL_COL_WIDTHS[:-1]
+
+    print("\n### 📊 Token Usage by Model")
+    print(f"*{mode.upper()} span: {span} · Cache = CacheWrite + CacheRead*\n")
+
+    header = ["Model", "Input", "Cache", "Output", "Total", "Cost ($)"]
+    print(md_row(header[:len(widths)], widths, left_align=1))
+    print(md_separator(widths))
+
+    tot_net_in = 0
+    tot_cache = 0
+    tot_out = 0
+    tot_total = 0
+    tot_cost = 0.0
+
+    for m_name, m_data in sort_models(model_totals, show_cost):
+        tot_net_in += m_data["net_input"]
+        tot_cache += m_data["cache_write"] + m_data["cached_input"]
+        tot_out += m_data["output"] + m_data["thoughts"]
+        tot_total += m_data["total_tokens"]
+        tot_cost += m_data["cost"]
+
+        cells = [
+            m_name,
+            format_number(m_data["net_input"]),
+            format_number(m_data["cache_write"] + m_data["cached_input"]),
+            format_number(m_data["output"] + m_data["thoughts"]),
+            format_number(m_data["total_tokens"]),
+            format_currency(m_data["cost"]),
+        ]
+        print(md_row(cells[:len(widths)], widths, left_align=1))
+
+    totals = [
+        format_number(tot_net_in),
+        format_number(tot_cache),
+        format_number(tot_out),
+        format_number(tot_total),
+        format_currency(tot_cost),
+    ]
+    print(md_total_row(totals[:len(widths) - 1]) + "\n")
 
 
 def main():
@@ -685,8 +739,8 @@ def main():
     parser.add_argument("--last", type=int, help="Show last N periods")
     parser.add_argument("--json", action="store_true", help="Output result as JSON")
     parser.add_argument("--no-cost", action="store_true", help="Hide cost calculation")
-    parser.add_argument("--compact", action="store_true", help="Format compact output")
-    parser.add_argument("--breakdown", action="store_true", help="Show breakdown per model")
+    parser.add_argument("--compact", action="store_true", help="Collapse each period to a single aggregate row instead of one row per model")
+    parser.add_argument("--by-model", action="store_true", help="Aggregate the whole window into one per-model table instead of per-period rows")
     parser.add_argument("--data-dir", help="Custom root directory for data (e.g. ~/.gemini)")
 
     args = parser.parse_args()
@@ -717,7 +771,22 @@ def main():
         sorted_keys = sorted(grouped.keys())[-args.last:]
         grouped = {k: grouped[k] for k in sorted_keys}
 
-    if args.json:
+    if args.json and args.by_model:
+        model_totals = aggregate_by_model(grouped)
+        output_json = [
+            {
+                "model": m,
+                "net_input_tokens": val["net_input"],
+                "cache_write_tokens": val["cache_write"],
+                "cached_input_tokens": val["cached_input"],
+                "output_tokens": val["output"] + val["thoughts"],
+                "total_tokens": val["total_tokens"],
+                "cost_usd": round(val["cost"], 6) if not args.no_cost else None,
+            }
+            for m, val in sorted(model_totals.items(), key=lambda item: item[1]["cost"], reverse=True)
+        ]
+        print(json.dumps(output_json, indent=2, ensure_ascii=False))
+    elif args.json:
         output_json = []
         for k in sorted(grouped.keys()):
             item = grouped[k]
@@ -731,22 +800,23 @@ def main():
                 "total_tokens": item["total_tokens"],
                 "cost_usd": round(item["cost"], 6) if not args.no_cost else None,
             }
-            if args.breakdown:
-                record["breakdown"] = {
-                    m: {
-                        "net_input_tokens": val["net_input"],
-                        "cache_write_tokens": val["cache_write"],
-                        "cached_input_tokens": val["cached_input"],
-                        "output_tokens": val["output"] + val["thoughts"],
-                        "total_tokens": val["total_tokens"],
-                        "cost_usd": round(val["cost"], 6) if not args.no_cost else None
-                    }
-                    for m, val in item["breakdown"].items()
+            record["breakdown"] = {
+                m: {
+                    "net_input_tokens": val["net_input"],
+                    "cache_write_tokens": val["cache_write"],
+                    "cached_input_tokens": val["cached_input"],
+                    "output_tokens": val["output"] + val["thoughts"],
+                    "total_tokens": val["total_tokens"],
+                    "cost_usd": round(val["cost"], 6) if not args.no_cost else None
                 }
+                for m, val in item["breakdown"].items()
+            }
             output_json.append(record)
         print(json.dumps(output_json, indent=2, ensure_ascii=False))
+    elif args.by_model:
+        print_model_table(grouped, mode=args.mode, show_cost=not args.no_cost)
     else:
-        print_table(grouped, mode=args.mode, show_cost=not args.no_cost, compact=args.compact, show_breakdown=args.breakdown)
+        print_table(grouped, mode=args.mode, show_cost=not args.no_cost, compact=args.compact)
 
 
 if __name__ == "__main__":
