@@ -11,7 +11,7 @@ import json
 import sqlite3
 import argparse
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Any, Optional, Tuple, Set
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -56,21 +56,30 @@ class TokenEntry:
         cached_input: int,
         output: int,
         thoughts: int = 0,
-        source: str = "antigravity"
+        source: str = "antigravity",
+        cache_write: int = 0,
+        cache_write_1h: int = 0,
+        input_is_net: bool = False
     ):
         self.timestamp = timestamp
         self.session_id = session_id
         self.model = model.strip() if model else "unknown"
         self.raw_input = max(0, raw_input)
         self.cached_input = max(0, cached_input)
-        self.net_input = max(0, self.raw_input - self.cached_input) if self.raw_input >= self.cached_input else self.raw_input
+        # Anthropic reports input_tokens exclusive of cached tokens; OpenAI/Gemini/OTEL include them.
+        if input_is_net:
+            self.net_input = self.raw_input
+        else:
+            self.net_input = max(0, self.raw_input - self.cached_input) if self.raw_input >= self.cached_input else self.raw_input
+        self.cache_write = max(0, cache_write)
+        self.cache_write_1h = max(0, cache_write_1h)
         self.output = max(0, output)
         self.thoughts = max(0, thoughts)
         self.source = source
 
     @property
     def total_tokens(self) -> int:
-        return self.net_input + self.cached_input + self.output + self.thoughts
+        return self.net_input + self.cached_input + self.cache_write + self.cache_write_1h + self.output + self.thoughts
 
     def calculate_cost(self, pricing_config: Dict[str, Any]) -> float:
         models_map = pricing_config.get("models", {})
@@ -88,8 +97,16 @@ class TokenEntry:
         input_rate = matched_rates.get("input_cost_per_token", 7.5e-8)
         cache_rate = matched_rates.get("cache_read_input_token_cost", 1.875e-8)
         output_rate = matched_rates.get("output_cost_per_token", 3e-7)
+        write_rate = matched_rates.get("cache_creation_input_token_cost", input_rate * 1.25)
+        write_1h_rate = matched_rates.get("cache_creation_1h_input_token_cost", input_rate * 2)
 
-        return (self.net_input * input_rate) + (self.cached_input * cache_rate) + ((self.output + self.thoughts) * output_rate)
+        return (
+            (self.net_input * input_rate)
+            + (self.cached_input * cache_rate)
+            + (self.cache_write * write_rate)
+            + (self.cache_write_1h * write_1h_rate)
+            + ((self.output + self.thoughts) * output_rate)
+        )
 
     @property
     def unique_key(self) -> Tuple[str, str, str, str, int, int, int]:
@@ -204,11 +221,15 @@ def parse_antigravity_brain_transcripts(home_dir: str) -> List[TokenEntry]:
 
 
 def parse_claude_transcripts(home_dir: str) -> List[TokenEntry]:
-    entries: List[TokenEntry] = []
     claude_dir = os.path.join(home_dir, ".claude", "projects")
     if not os.path.exists(claude_dir):
-        return entries
-        
+        return []
+
+    # Claude Code writes one JSONL line per content block (thinking / text / tool_use) of the
+    # same API response, each repeating the whole usage object with a cumulative output count.
+    # Collapse them per (message id, requestId) and keep the line with the largest output.
+    best: Dict[Tuple[Optional[str], Optional[str]], Dict[str, Any]] = {}
+
     for root, _, files in os.walk(claude_dir):
         for file in files:
             if not file.endswith(".jsonl"):
@@ -219,35 +240,56 @@ def parse_claude_transcripts(home_dir: str) -> List[TokenEntry]:
                 with open(t_path, "r", encoding="utf-8", errors="replace") as f:
                     for line in f:
                         line = line.strip()
-                        if not line or '"usage":{' not in line:
+                        if not line or '"usage"' not in line:
                             continue
                         try:
                             data = json.loads(line)
-                            if "message" in data and "usage" in data["message"]:
-                                usage = data["message"]["usage"]
-                                in_tok = usage.get("input_tokens", 0)
-                                out_tok = usage.get("output_tokens", 0)
-                                cache_read = usage.get("cache_read_input_tokens", 0)
-                                
-                                ts_raw = data.get("timestamp")
-                                ts = parse_iso_timestamp(ts_raw)
-                                
-                                model = data["message"].get("model", "unknown")
-                                sess_id = data.get("sessionId", session_id)
-                                
-                                entries.append(TokenEntry(
-                                    timestamp=ts,
-                                    session_id=sess_id,
-                                    model=model,
-                                    raw_input=in_tok,
-                                    cached_input=cache_read,
-                                    output=out_tok,
-                                    source="claude"
-                                ))
                         except Exception:
                             continue
+                        message = data.get("message")
+                        if not isinstance(message, dict):
+                            continue
+                        usage = message.get("usage")
+                        if not isinstance(usage, dict):
+                            continue
+                        model = message.get("model") or "unknown"
+                        if model.startswith("<"):
+                            continue
+
+                        key = (message.get("id"), data.get("requestId"))
+                        prev = best.get(key)
+                        if prev is not None and prev["usage"].get("output_tokens", 0) >= usage.get("output_tokens", 0):
+                            continue
+                        best[key] = {
+                            "usage": usage,
+                            "model": model,
+                            "timestamp": data.get("timestamp"),
+                            "session_id": data.get("sessionId", session_id),
+                        }
             except Exception:
                 pass
+
+    entries: List[TokenEntry] = []
+    for record in best.values():
+        usage = record["usage"]
+        creation = usage.get("cache_creation") or {}
+        write_5m = creation.get("ephemeral_5m_input_tokens", 0)
+        write_1h = creation.get("ephemeral_1h_input_tokens", 0)
+        if write_5m == 0 and write_1h == 0:
+            write_5m = usage.get("cache_creation_input_tokens", 0)
+
+        entries.append(TokenEntry(
+            timestamp=parse_iso_timestamp(record["timestamp"]),
+            session_id=record["session_id"],
+            model=record["model"],
+            raw_input=usage.get("input_tokens", 0),
+            cached_input=usage.get("cache_read_input_tokens", 0),
+            output=usage.get("output_tokens", 0),
+            source="claude",
+            cache_write=write_5m,
+            cache_write_1h=write_1h,
+            input_is_net=True
+        ))
     return entries
 
 
@@ -419,7 +461,8 @@ def group_entries(
 ) -> Dict[str, Dict[str, Any]]:
     """Group token entries by date/week/month/session."""
     grouped: Dict[str, Dict[str, Any]] = {}
-    
+    pricing = load_pricing_config()
+
     for entry in entries:
         dt = entry.timestamp.astimezone()
         if mode == "weekly":
@@ -436,6 +479,7 @@ def group_entries(
                 "period": key,
                 "models": set(),
                 "net_input": 0,
+                "cache_write": 0,
                 "cached_input": 0,
                 "output": 0,
                 "thoughts": 0,
@@ -448,12 +492,12 @@ def group_entries(
         grp = grouped[key]
         grp["models"].add(entry.model)
         grp["net_input"] += entry.net_input
+        grp["cache_write"] += entry.cache_write + entry.cache_write_1h
         grp["cached_input"] += entry.cached_input
         grp["output"] += entry.output
         grp["thoughts"] += entry.thoughts
         grp["total_tokens"] += entry.total_tokens
-        
-        pricing = load_pricing_config()
+
         cost = entry.calculate_cost(pricing)
         grp["cost"] += cost
         grp["count"] += 1
@@ -462,6 +506,7 @@ def group_entries(
         if m not in grp["breakdown"]:
             grp["breakdown"][m] = {
                 "net_input": 0,
+                "cache_write": 0,
                 "cached_input": 0,
                 "output": 0,
                 "thoughts": 0,
@@ -469,6 +514,7 @@ def group_entries(
                 "cost": 0.0
             }
         grp["breakdown"][m]["net_input"] += entry.net_input
+        grp["breakdown"][m]["cache_write"] += entry.cache_write + entry.cache_write_1h
         grp["breakdown"][m]["cached_input"] += entry.cached_input
         grp["breakdown"][m]["output"] += entry.output
         grp["breakdown"][m]["thoughts"] += entry.thoughts
@@ -485,18 +531,21 @@ def filter_entries(
     last: Optional[int] = None
 ) -> List[TokenEntry]:
     """Filter token entries by date bounds or last N items."""
+    # Bounds are local dates, matching how group_entries() buckets by local time.
     filtered = entries
     if since:
         try:
-            since_dt = datetime.fromisoformat(since).replace(tzinfo=timezone.utc)
-            filtered = [e for e in filtered if e.timestamp >= since_dt]
+            since_dt = datetime.fromisoformat(since).astimezone()
+            filtered = [e for e in filtered if e.timestamp.astimezone() >= since_dt]
         except Exception:
             pass
-            
+
     if until:
         try:
-            until_dt = datetime.fromisoformat(until).replace(tzinfo=timezone.utc)
-            filtered = [e for e in filtered if e.timestamp <= until_dt]
+            until_dt = datetime.fromisoformat(until).astimezone()
+            if until_dt.time() == datetime.min.time():
+                until_dt = until_dt + timedelta(days=1)
+            filtered = [e for e in filtered if e.timestamp.astimezone() < until_dt]
         except Exception:
             pass
 
@@ -527,16 +576,17 @@ def print_table(
     print("*Context Window Prefill Included*\n")
 
     if show_cost:
-        header = f"| {period_label:<14} | {'Models':<24} | {'Input':<10} | {'Cached':<10} | {'Output':<10} | {'Total':<11} | {'Cost ($)':<9} |"
-        separator = f"| {'-'*14} | {'-'*24} | {'-'*10} | {'-'*10} | {'-'*10} | {'-'*11} | {'-'*9} |"
+        header = f"| {period_label:<14} | {'Models':<24} | {'Input':<10} | {'CacheWrite':<10} | {'CacheRead':<11} | {'Output':<10} | {'Total':<11} | {'Cost ($)':<9} |"
+        separator = f"| {'-'*14} | {'-'*24} | {'-'*10} | {'-'*10} | {'-'*11} | {'-'*10} | {'-'*11} | {'-'*9} |"
     else:
-        header = f"| {period_label:<14} | {'Models':<24} | {'Input':<10} | {'Cached':<10} | {'Output':<10} | {'Total':<11} |"
-        separator = f"| {'-'*14} | {'-'*24} | {'-'*10} | {'-'*10} | {'-'*10} | {'-'*11} |"
+        header = f"| {period_label:<14} | {'Models':<24} | {'Input':<10} | {'CacheWrite':<10} | {'CacheRead':<11} | {'Output':<10} | {'Total':<11} |"
+        separator = f"| {'-'*14} | {'-'*24} | {'-'*10} | {'-'*10} | {'-'*11} | {'-'*10} | {'-'*11} |"
 
     print(header)
     print(separator)
 
     tot_net_in = 0
+    tot_cache_write = 0
     tot_cached_in = 0
     tot_out = 0
     tot_total = 0
@@ -575,12 +625,14 @@ def print_table(
             model_lines = [f"{len(models_list)} models"]
 
         net_in = format_number(grp["net_input"])
+        cache_w = format_number(grp["cache_write"])
         cached_in = format_number(grp["cached_input"])
         out = format_number(grp["output"] + grp["thoughts"])
         total = format_number(grp["total_tokens"])
         cost_str = format_currency(grp["cost"])
 
         tot_net_in += grp["net_input"]
+        tot_cache_write += grp["cache_write"]
         tot_cached_in += grp["cached_input"]
         tot_out += (grp["output"] + grp["thoughts"])
         tot_total += grp["total_tokens"]
@@ -588,38 +640,40 @@ def print_table(
 
         first_model = model_lines[0] if model_lines else ""
         if show_cost:
-            print(f"| {grp['period']:<14} | {first_model:<24} | {net_in:>10} | {cached_in:>10} | {out:>10} | {total:>11} | {cost_str:>9} |")
+            print(f"| {grp['period']:<14} | {first_model:<24} | {net_in:>10} | {cache_w:>10} | {cached_in:>11} | {out:>10} | {total:>11} | {cost_str:>9} |")
         else:
-            print(f"| {grp['period']:<14} | {first_model:<24} | {net_in:>10} | {cached_in:>10} | {out:>10} | {total:>11} |")
-            
+            print(f"| {grp['period']:<14} | {first_model:<24} | {net_in:>10} | {cache_w:>10} | {cached_in:>11} | {out:>10} | {total:>11} |")
+
         for line in model_lines[1:]:
             if show_cost:
-                print(f"| {'':<14} | {line:<24} | {'':>10} | {'':>10} | {'':>10} | {'':>11} | {'':>9} |")
+                print(f"| {'':<14} | {line:<24} | {'':>10} | {'':>10} | {'':>11} | {'':>10} | {'':>11} | {'':>9} |")
             else:
-                print(f"| {'':<14} | {line:<24} | {'':>10} | {'':>10} | {'':>10} | {'':>11} |")
+                print(f"| {'':<14} | {line:<24} | {'':>10} | {'':>10} | {'':>11} | {'':>10} | {'':>11} |")
 
         if show_breakdown and len(grp["breakdown"]) > 1:
             for m_name, m_data in grp["breakdown"].items():
                 m_net = format_number(m_data["net_input"])
+                m_write = format_number(m_data["cache_write"])
                 m_cached = format_number(m_data["cached_input"])
                 m_out = format_number(m_data["output"] + m_data["thoughts"])
                 m_tot = format_number(m_data["total_tokens"])
                 m_cost = format_currency(m_data["cost"])
                 if show_cost:
-                    print(f"| {'':<14} | └─ {m_name:<21} | {m_net:>10} | {m_cached:>10} | {m_out:>10} | {m_tot:>11} | {m_cost:>9} |")
+                    print(f"| {'':<14} | └─ {m_name:<21} | {m_net:>10} | {m_write:>10} | {m_cached:>11} | {m_out:>10} | {m_tot:>11} | {m_cost:>9} |")
                 else:
-                    print(f"| {'':<14} | └─ {m_name:<21} | {m_net:>10} | {m_cached:>10} | {m_out:>10} | {m_tot:>11} |")
+                    print(f"| {'':<14} | └─ {m_name:<21} | {m_net:>10} | {m_write:>10} | {m_cached:>11} | {m_out:>10} | {m_tot:>11} |")
 
     tot_net_in_str = format_number(tot_net_in)
+    tot_cache_write_str = format_number(tot_cache_write)
     tot_cached_in_str = format_number(tot_cached_in)
     tot_out_str = format_number(tot_out)
     tot_total_str = format_number(tot_total)
     tot_cost_str = format_currency(tot_cost)
 
     if show_cost:
-        print(f"| **Total** | - | **{tot_net_in_str}** | **{tot_cached_in_str}** | **{tot_out_str}** | **{tot_total_str}** | **{tot_cost_str}** |\n")
+        print(f"| **Total** | - | **{tot_net_in_str}** | **{tot_cache_write_str}** | **{tot_cached_in_str}** | **{tot_out_str}** | **{tot_total_str}** | **{tot_cost_str}** |\n")
     else:
-        print(f"| **Total** | - | **{tot_net_in_str}** | **{tot_cached_in_str}** | **{tot_out_str}** | **{tot_total_str}** |\n")
+        print(f"| **Total** | - | **{tot_net_in_str}** | **{tot_cache_write_str}** | **{tot_cached_in_str}** | **{tot_out_str}** | **{tot_total_str}** |\n")
 
 
 def main():
@@ -671,6 +725,7 @@ def main():
                 "period": item["period"],
                 "models": list(item["models"]),
                 "net_input_tokens": item["net_input"],
+                "cache_write_tokens": item["cache_write"],
                 "cached_input_tokens": item["cached_input"],
                 "output_tokens": item["output"] + item["thoughts"],
                 "total_tokens": item["total_tokens"],
@@ -680,6 +735,7 @@ def main():
                 record["breakdown"] = {
                     m: {
                         "net_input_tokens": val["net_input"],
+                        "cache_write_tokens": val["cache_write"],
                         "cached_input_tokens": val["cached_input"],
                         "output_tokens": val["output"] + val["thoughts"],
                         "total_tokens": val["total_tokens"],
