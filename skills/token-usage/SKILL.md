@@ -45,3 +45,6 @@ python3 scripts/token_usage.py $ARGUMENTS
 ### Step 2 — Display & Summarize Results
 
 Present the ASCII table report or JSON summary clearly to the user. Highlight total input, cached read, output tokens, and total USD estimated cost.
+
+**Important Output Formatting**:
+When outputting the ASCII table, do NOT wrap it in a markdown code block (e.g., ` ```text ` or ` ``` `). Output the table structure directly as standard markdown so the user's interface can render it properly.
