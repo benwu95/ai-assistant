@@ -24,7 +24,8 @@ used_pct=""
 cli_version=""
 cycle_mode="default"
 
-eval "$(jq -r '
+parse_payload() {
+  jq -r '
   ((.agent_state // .state // "idle")) as $st |
   ((.model.display_name // .model.id // "")) as $m |
   ($m | ascii_downcase) as $m_lower |
@@ -57,7 +58,14 @@ eval "$(jq -r '
   "used_pct=" + ((.context_window.used_percentage // .context_window.current_usage.used_percentage // .used_percentage // "") | tostring | @sh) + "\n" +
   "cli_version=" + ((.version // "") | tostring | @sh) + "\n" +
   "cycle_mode=" + ((.cycle_mode // .agent_mode // .mode // "default") | tostring | @sh)
-' 2>/dev/null)"
+' 2>/dev/null
+}
+
+if [ -t 0 ]; then
+  eval "$(echo "{}" | parse_payload)"
+else
+  eval "$(parse_payload)"
+fi
 
 format_number() {
   local num=$1
@@ -222,21 +230,26 @@ if [ -z "$cwd" ] || [ "$cwd" = "null" ]; then
   cwd=$(pwd)
 fi
 
+# Wrap git commands with a 1-second timeout to prevent statusline hanging (signal: killed)
+git_cmd() {
+  perl -e 'alarm shift; exec @ARGV' 1 git "$@"
+}
+
 # Resolve Git state
 is_git="false"
 is_worktree="false"
 git_dir=""
 git_op=""
 
-git_info=$(git -C "$cwd" rev-parse --is-inside-work-tree --absolute-git-dir 2>/dev/null)
+git_info=$(git_cmd -C "$cwd" rev-parse --is-inside-work-tree --absolute-git-dir 2>/dev/null)
 if [ -n "$git_info" ]; then
   is_git="true"
   git_dir=$(echo "$git_info" | sed -n '2p')
 
   # Fallback to manual resolution if CLI payload did not provide a branch
   if [ -z "$branch" ] || [ "$branch" = "null" ]; then
-    short_sha=$(git -C "$cwd" rev-parse --short HEAD 2>/dev/null)
-    local_branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
+    short_sha=$(git_cmd -C "$cwd" rev-parse --short HEAD 2>/dev/null)
+    local_branch=$(git_cmd -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
     if [ -n "$local_branch" ]; then
       branch="$local_branch"
     elif [ -n "$short_sha" ]; then
@@ -246,7 +259,7 @@ if [ -n "$git_info" ]; then
 
   # Fallback to manual resolution if CLI payload did not provide dirty status
   if [ -z "$dirty" ] || [ "$dirty" = "null" ]; then
-    if [ -n "$(git -C "$cwd" status --porcelain -unormal 2>/dev/null)" ]; then
+    if [ -n "$(git_cmd -C "$cwd" status --porcelain -unormal 2>/dev/null)" ]; then
       dirty="true"
     else
       dirty="false"
@@ -346,17 +359,17 @@ fi
 
 if [ "$is_git" = "true" ]; then
   base_branch="main"
-  if ! git -C "$cwd" show-ref --verify --quiet refs/heads/main 2>/dev/null; then
-    if git -C "$cwd" show-ref --verify --quiet refs/heads/master 2>/dev/null; then
+  if ! git_cmd -C "$cwd" show-ref --verify --quiet refs/heads/main 2>/dev/null; then
+    if git_cmd -C "$cwd" show-ref --verify --quiet refs/heads/master 2>/dev/null; then
       base_branch="master"
     fi
   fi
 
-  current_branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
+  current_branch=$(git_cmd -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
   if [ "$current_branch" = "$base_branch" ] || [ -z "$current_branch" ]; then
     diff_target="HEAD"
   else
-    merge_base=$(git -C "$cwd" merge-base "$base_branch" HEAD 2>/dev/null)
+    merge_base=$(git_cmd -C "$cwd" merge-base "$base_branch" HEAD 2>/dev/null)
     if [ -n "$merge_base" ]; then
       diff_target="$merge_base"
     else
@@ -364,7 +377,7 @@ if [ "$is_git" = "true" ]; then
     fi
   fi
 
-  git_stat=$(git -C "$cwd" diff "$diff_target" --raw --numstat 2>/dev/null | awk '
+  git_stat=$(git_cmd -C "$cwd" diff "$diff_target" --raw --numstat 2>/dev/null | awk '
     BEGIN { mod=0; add=0; del=0; ren=0; add_lines=0; del_lines=0 }
     /^:[0-9]{6}/ {
       status = substr($5, 1, 1)
@@ -488,12 +501,15 @@ for i in "${!line3_segments[@]}"; do
   fi
 done
 
-output="$line1_output"
-if [ -n "$line2_output" ]; then
-  output="$output\n$line2_output"
+output=""
+[ -n "$line2_output" ] && output="$line2_output"
+
+if [ -n "$line1_output" ]; then
+  [ -n "$output" ] && output="$output\n$line1_output" || output="$line1_output"
 fi
+
 if [ -n "$line3_output" ]; then
-  output="$output\n$line3_output"
+  [ -n "$output" ] && output="$output\n$line3_output" || output="$line3_output"
 fi
 
 echo -e "$output"
