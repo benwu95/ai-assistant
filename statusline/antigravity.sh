@@ -1,11 +1,30 @@
 #!/bin/bash
-# Read JSON payload from stdin
-payload=$(cat)
-if [ -z "$payload" ]; then
-  payload="{}"
-fi
+# Set defaults
+agent_state="idle"
+model=""
+cwd=""
+branch=""
+dirty="false"
+subagents_count="0"
+sandbox_val="false"
+tokens_in="0"
+tokens_out="0"
+tokens_cached="0"
+tokens_thinking="0"
+credits_rem=""
+remaining_fraction=""
+reset_in_seconds=""
+weekly_remaining_fraction=""
+weekly_reset_in_seconds=""
+rate_limits_used=""
+rate_limits_reset=""
+rate_limits_weekly_used=""
+rate_limits_weekly_reset=""
+used_pct=""
+cli_version=""
+cycle_mode="default"
 
-eval "$(echo "$payload" | jq -r '
+eval "$(jq -r '
   ((.agent_state // .state // "idle")) as $st |
   ((.model.display_name // .model.id // "")) as $m |
   ($m | ascii_downcase) as $m_lower |
