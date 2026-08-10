@@ -93,9 +93,9 @@ class TokenEntry:
         return (self.net_input * input_rate) + (self.cached_input * cache_rate) + ((self.output + self.thoughts) * output_rate)
 
     @property
-    def unique_key(self) -> Tuple[str, str, str, int, int, int]:
+    def unique_key(self) -> Tuple[str, str, str, str, int, int, int]:
         ts_str = self.timestamp.isoformat()
-        return (self.session_id, ts_str, self.model, self.raw_input, self.output, self.cached_input)
+        return (self.source, self.session_id, ts_str, self.model, self.raw_input, self.output, self.cached_input)
 
 
 def parse_antigravity_brain_transcripts(home_dir: str) -> List[TokenEntry]:
@@ -201,6 +201,194 @@ def parse_antigravity_brain_transcripts(home_dir: str) -> List[TokenEntry]:
         except Exception:
             pass
 
+    return entries
+
+
+def parse_claude_transcripts(home_dir: str) -> List[TokenEntry]:
+    entries: List[TokenEntry] = []
+    claude_dir = os.path.join(home_dir, ".claude", "projects")
+    if not os.path.exists(claude_dir):
+        return entries
+        
+    for root, _, files in os.walk(claude_dir):
+        for file in files:
+            if not file.endswith(".jsonl"):
+                continue
+            t_path = os.path.join(root, file)
+            session_id = os.path.splitext(file)[0]
+            try:
+                with open(t_path, "r", encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or '"usage":{' not in line:
+                            continue
+                        try:
+                            data = json.loads(line)
+                            if "message" in data and "usage" in data["message"]:
+                                usage = data["message"]["usage"]
+                                in_tok = usage.get("input_tokens", 0)
+                                out_tok = usage.get("output_tokens", 0)
+                                cache_read = usage.get("cache_read_input_tokens", 0)
+                                
+                                ts_raw = data.get("timestamp")
+                                ts = parse_iso_timestamp(ts_raw)
+                                
+                                model = data["message"].get("model", "unknown")
+                                sess_id = data.get("sessionId", session_id)
+                                
+                                entries.append(TokenEntry(
+                                    timestamp=ts,
+                                    session_id=sess_id,
+                                    model=model,
+                                    raw_input=in_tok,
+                                    cached_input=cache_read,
+                                    output=out_tok,
+                                    source="claude"
+                                ))
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+    return entries
+
+
+def parse_codex_transcripts(home_dir: str) -> List[TokenEntry]:
+    entries: List[TokenEntry] = []
+    for sub in ["sessions", "archived_sessions"]:
+        codex_dir = os.path.join(home_dir, ".codex", sub)
+        if not os.path.exists(codex_dir):
+            continue
+        for file in os.listdir(codex_dir):
+            if not file.endswith(".jsonl"):
+                continue
+            t_path = os.path.join(codex_dir, file)
+            session_id = os.path.splitext(file)[0]
+            
+            try:
+                with open(t_path, "r", encoding="utf-8", errors="replace") as f:
+                    current_model = "unknown"
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            data = json.loads(line)
+                            
+                            if data.get("type") == "turn_context":
+                                payload = data.get("payload", {})
+                                if "model" in payload:
+                                    current_model = payload["model"]
+                                continue
+                                
+                            if data.get("type") == "event_msg":
+                                payload = data.get("payload", {})
+                                if payload.get("type") == "token_count":
+                                    info = payload.get("info", {})
+                                    usage = info.get("last_token_usage")
+                                    if not usage:
+                                        continue
+                                    
+                                    in_tok = usage.get("input_tokens", usage.get("prompt_tokens", 0))
+                                    out_tok = usage.get("output_tokens", usage.get("completion_tokens", 0))
+                                    cache_read = usage.get("cache_read_input_tokens", 0)
+                                    
+                                    ts_raw = data.get("timestamp")
+                                    ts = parse_iso_timestamp(ts_raw)
+                                    
+                                    entries.append(TokenEntry(
+                                        timestamp=ts,
+                                        session_id=session_id,
+                                        model=current_model,
+                                        raw_input=in_tok,
+                                        cached_input=cache_read,
+                                        output=out_tok,
+                                        source="codex"
+                                    ))
+                                continue
+                            
+                            usage = data.get("usage") or data.get("data", {}).get("usage") or data.get("result", {}).get("usage")
+                            if usage and isinstance(usage, dict):
+                                in_tok = usage.get("input_tokens", usage.get("prompt_tokens", 0))
+                                out_tok = usage.get("output_tokens", usage.get("completion_tokens", 0))
+                                cache_read = usage.get("cache_read_input_tokens", 0)
+                                
+                                ts_raw = data.get("timestamp")
+                                ts = parse_iso_timestamp(ts_raw)
+                                model = data.get("model", current_model)
+                                
+                                entries.append(TokenEntry(
+                                    timestamp=ts,
+                                    session_id=session_id,
+                                    model=model,
+                                    raw_input=in_tok,
+                                    cached_input=cache_read,
+                                    output=out_tok,
+                                    source="codex"
+                                ))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+    return entries
+
+
+def parse_copilot_transcripts(home_dir: str) -> List[TokenEntry]:
+    entries: List[TokenEntry] = []
+    copilot_dir = os.path.join(home_dir, ".copilot", "otel")
+    if not os.path.exists(copilot_dir):
+        return entries
+        
+    for file in os.listdir(copilot_dir):
+        if not file.endswith(".jsonl"):
+            continue
+        t_path = os.path.join(copilot_dir, file)
+        
+        try:
+            with open(t_path, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or '"attributes"' not in line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                        attrs = data.get("attributes")
+                        if not attrs or not isinstance(attrs, dict):
+                            continue
+                            
+                        in_tok = attrs.get("gen_ai.usage.input_tokens", 0)
+                        out_tok = attrs.get("gen_ai.usage.output_tokens", 0)
+                        cache_read = attrs.get("gen_ai.usage.cache_read.input_tokens", 0)
+                        
+                        if in_tok == 0 and out_tok == 0:
+                            continue
+                            
+                        ts_raw = data.get("endTime") or data.get("time") or data.get("timestamp")
+                        ts = datetime.now(timezone.utc)
+                        if isinstance(ts_raw, list) and len(ts_raw) > 0:
+                            ts = datetime.fromtimestamp(ts_raw[0], timezone.utc)
+                        elif isinstance(ts_raw, (int, float)):
+                            if ts_raw > 1e16: ts = datetime.fromtimestamp(ts_raw/1e9, timezone.utc)
+                            elif ts_raw > 1e12: ts = datetime.fromtimestamp(ts_raw/1e3, timezone.utc)
+                            else: ts = datetime.fromtimestamp(ts_raw, timezone.utc)
+                        elif isinstance(ts_raw, str):
+                            ts = parse_iso_timestamp(ts_raw)
+                            
+                        session_id = attrs.get("gen_ai.conversation.id") or attrs.get("copilot_chat.session_id") or data.get("traceId", "unknown")
+                        model = attrs.get("gen_ai.response.model") or attrs.get("gen_ai.request.model", "unknown")
+                        
+                        entries.append(TokenEntry(
+                            timestamp=ts,
+                            session_id=str(session_id),
+                            model=str(model),
+                            raw_input=in_tok,
+                            cached_input=cache_read,
+                            output=out_tok,
+                            source="copilot"
+                        ))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
     return entries
 
 
@@ -407,7 +595,7 @@ def print_table(
 def main():
     parser = argparse.ArgumentParser(description="AI Assistant Token Usage & Cost Calculator")
     parser.add_argument("mode", nargs="?", default="daily", choices=["daily", "weekly", "monthly", "session"], help="Report aggregation mode")
-    parser.add_argument("--source", default="antigravity", choices=["antigravity", "all"], help="Source CLI to calculate token usage for")
+    parser.add_argument("--source", default="all", choices=["antigravity", "claude", "codex", "copilot", "all"], help="Source CLI to calculate token usage for")
     parser.add_argument("--since", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--until", help="End date (YYYY-MM-DD)")
     parser.add_argument("--last", type=int, help="Show last N periods")
@@ -420,10 +608,18 @@ def main():
     args = parser.parse_args()
     home_dir = args.data_dir or os.path.expanduser("~")
     
-    raw_entries: List[TokenEntry] = parse_antigravity_brain_transcripts(home_dir)
+    raw_entries: List[TokenEntry] = []
+    if args.source in ("antigravity", "all"):
+        raw_entries.extend(parse_antigravity_brain_transcripts(home_dir))
+    if args.source in ("claude", "all"):
+        raw_entries.extend(parse_claude_transcripts(home_dir))
+    if args.source in ("codex", "all"):
+        raw_entries.extend(parse_codex_transcripts(home_dir))
+    if args.source in ("copilot", "all"):
+        raw_entries.extend(parse_copilot_transcripts(home_dir))
 
     unique_entries: List[TokenEntry] = []
-    seen_keys: Set[Tuple[str, str, str, int, int, int]] = set()
+    seen_keys: Set[Tuple[str, str, str, str, int, int, int]] = set()
     for entry in raw_entries:
         k = entry.unique_key
         if k not in seen_keys:

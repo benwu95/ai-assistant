@@ -1,12 +1,12 @@
 ---
 name: token-usage
-description: "Calculate and aggregate token usage and cost metrics for coding agent CLIs (antigravity CLI, etc.). Supports daily, weekly, monthly, and session aggregations with USD cost calculation. Activate when asked for token usage, token 統計, token 用量, 用量計算, 花費計算, cost report, token report, or agy token usage."
+description: "Calculate and aggregate token usage and cost metrics for coding agent CLIs (antigravity CLI, claude, codex, copilot). Supports daily, weekly, monthly, and session aggregations with USD cost calculation. Activate when asked for token usage, token 統計, token 用量, 用量計算, 花費計算, cost report, token report, or agy token usage."
 allowed-tools: run_command, view_file
 ---
 
 # Token Usage Skill
 
-Calculate and aggregate token usage and cost metrics from local CLI conversation logs (`~/.gemini/tmp/*/chats/session-*.jsonl` and `~/.gemini/antigravity-cli/conversations/*.db`).
+Calculate and aggregate token usage and cost metrics from local CLI conversation logs (antigravity CLI, claude, codex, copilot).
 
 All Chinese output MUST follow the terminology table and typography rules in `~/.ai-assistant/shared/taiwan-terminology.md`.
 
@@ -16,6 +16,7 @@ All Chinese output MUST follow the terminology table and typography rules in `~/
 
 - `MODE`: aggregation window — `daily` (default), `weekly`, `monthly`, or `session`.
 - `OPTIONS`:
+  - `--source`: Source CLI to calculate token usage for (`antigravity`, `claude`, `codex`, `copilot`, `all`). Defaults to `all`.
   - `--since YYYY-MM-DD`: Filter logs starting from date.
   - `--until YYYY-MM-DD`: Filter logs up to date.
   - `--last N`: Limit output to the last N periods (e.g. `--last 1` for today / this week).
