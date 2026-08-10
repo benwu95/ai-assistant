@@ -312,6 +312,53 @@ if [ -n "$cwd_fmt" ]; then
   line1_segments+=("$cwd_fmt")
 fi
 
+if [ "$is_git" = "true" ]; then
+  base_branch="main"
+  if ! git -C "$cwd" show-ref --verify --quiet refs/heads/main 2>/dev/null; then
+    if git -C "$cwd" show-ref --verify --quiet refs/heads/master 2>/dev/null; then
+      base_branch="master"
+    fi
+  fi
+
+  current_branch=$(git -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
+  if [ "$current_branch" = "$base_branch" ] || [ -z "$current_branch" ]; then
+    diff_target="HEAD"
+  else
+    merge_base=$(git -C "$cwd" merge-base "$base_branch" HEAD 2>/dev/null)
+    if [ -n "$merge_base" ]; then
+      diff_target="$merge_base"
+    else
+      diff_target="$base_branch"
+    fi
+  fi
+
+  git_stat=$(git -C "$cwd" diff "$diff_target" --raw --numstat 2>/dev/null | awk '
+    BEGIN { mod=0; add=0; del=0; ren=0; add_lines=0; del_lines=0 }
+    /^:[0-9]{6}/ {
+      status = substr($5, 1, 1)
+      if (status == "M" || status == "T") mod++
+      else if (status == "A") add++
+      else if (status == "D") del++
+      else if (status == "R") ren++
+      next
+    }
+    /^[0-9-]+\t[0-9-]+\t/ {
+      if ($1 != "-") add_lines += $1
+      if ($2 != "-") del_lines += $2
+      next
+    }
+    END {
+      printf "+%d/-%d M:%d A:%d D:%d R:%d", add_lines, del_lines, mod, add, del, ren
+    }')
+
+  lines_stat=$(echo "$git_stat" | cut -d' ' -f1)
+  file_stat=$(echo "$git_stat" | cut -d' ' -f2-)
+  lines_add=$(echo "$lines_stat" | cut -d'/' -f1)
+  lines_del=$(echo "$lines_stat" | cut -d'/' -f2)
+
+  line1_segments+=("📝 \033[1;32m$lines_add\033[0m/\033[1;31m$lines_del\033[0m, $file_stat")
+fi
+
 if [ "$sandbox_val" = "true" ]; then
   line1_segments+=("Sandbox: On")
 else
