@@ -14,10 +14,9 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Tuple, Set
 
-# Determine script & project root directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-PRICING_FILE = os.path.join(PROJECT_ROOT, "shared", "gemini-pricing.json")
+PRICING_FILE = os.path.join(PROJECT_ROOT, "shared", "token-pricing.json")
 
 # Base system prompt + instructions + default tools context size estimate (~2500 tokens)
 BASE_SYSTEM_PROMPT_TOKENS = 2500
@@ -547,9 +546,33 @@ def print_table(
 
     for k in sorted_keys:
         grp = grouped[k]
-        models_str = ", ".join(sorted(grp["models"]))
-        if len(models_str) > 24 and compact:
-            models_str = models_str[:21] + "..."
+        
+        models_list = sorted(grp["models"])
+        providers = {}
+        for m in models_list:
+            m_lower = m.lower()
+            if m_lower.startswith("gemini"):
+                p = "gemini"
+            elif m_lower.startswith("claude"):
+                p = "claude"
+            elif m_lower.startswith("gpt") or m_lower.startswith("o1"):
+                p = "openai"
+            elif m_lower == "<synthetic>":
+                p = "system"
+            else:
+                p = "other"
+            if p not in providers:
+                providers[p] = []
+            providers[p].append(m)
+
+        model_lines = []
+        for p in sorted(providers.keys()):
+            model_lines.append(p)
+            for m in providers[p]:
+                model_lines.append(f"  - {m}")
+                    
+        if compact and len(model_lines) > 5:
+            model_lines = [f"{len(models_list)} models"]
 
         net_in = format_number(grp["net_input"])
         cached_in = format_number(grp["cached_input"])
@@ -563,10 +586,17 @@ def print_table(
         tot_total += grp["total_tokens"]
         tot_cost += grp["cost"]
 
+        first_model = model_lines[0] if model_lines else ""
         if show_cost:
-            print(f"| {grp['period']:<14} | {models_str:<24} | {net_in:>10} | {cached_in:>10} | {out:>10} | {total:>11} | {cost_str:>9} |")
+            print(f"| {grp['period']:<14} | {first_model:<24} | {net_in:>10} | {cached_in:>10} | {out:>10} | {total:>11} | {cost_str:>9} |")
         else:
-            print(f"| {grp['period']:<14} | {models_str:<24} | {net_in:>10} | {cached_in:>10} | {out:>10} | {total:>11} |")
+            print(f"| {grp['period']:<14} | {first_model:<24} | {net_in:>10} | {cached_in:>10} | {out:>10} | {total:>11} |")
+            
+        for line in model_lines[1:]:
+            if show_cost:
+                print(f"| {'':<14} | {line:<24} | {'':>10} | {'':>10} | {'':>10} | {'':>11} | {'':>9} |")
+            else:
+                print(f"| {'':<14} | {line:<24} | {'':>10} | {'':>10} | {'':>10} | {'':>11} |")
 
         if show_breakdown and len(grp["breakdown"]) > 1:
             for m_name, m_data in grp["breakdown"].items():

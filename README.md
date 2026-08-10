@@ -31,6 +31,28 @@ All files produced by skills, commands, and the system workflow are stored under
 
 When adding a new skill or command that writes files, follow the same convention: resolve `currentBranch` via `git rev-parse --abbrev-ref HEAD` and write to `.tasks/{currentBranch}/<artifact>.md`.
 
+## Token Usage
+
+The `token-usage` skill calculates and aggregates token usage and estimated cost metrics from local CLI conversation logs.
+
+**Supported Agents / CLIs:** `antigravity`, `claude`, `codex`, `copilot`
+
+**Usage Examples (in chat):**
+- `/token-usage` (defaults to daily aggregation for all sources)
+- `/token-usage since 2026-07-01`
+- `/token-usage weekly --source claude`
+- `/token-usage monthly --last 3 --breakdown`
+
+**Available Options:**
+- **Aggregation mode**: `daily` (default), `weekly`, `monthly`, or `session`
+- `--source <name>`: Filter by source (`antigravity`, `claude`, `codex`, `copilot`, `all`)
+- `--since YYYY-MM-DD` / `--until YYYY-MM-DD`: Filter by date range
+- `--last N`: Limit output to the last N periods
+- `--breakdown`: Include per-model breakdown rows
+- `--no-cost`: Omit USD cost calculation
+- `--json`: Output raw JSON data
+
+*(Note: Pricing rates are configured in `shared/token-pricing.json`.)*
 ## Setup
 
 **Prerequisites:** `git`; on Windows, creating symlinks requires Developer Mode (Settings > Privacy & security > For developers) or running PowerShell as Administrator.
