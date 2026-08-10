@@ -257,7 +257,7 @@ else
   fi
 fi
 
-# Line 1 segments
+# Line 1 segments (System)
 line1_segments=()
 
 if [ -n "$cli_version" ] && [ "$cli_version" != "null" ]; then
@@ -285,6 +285,19 @@ case "$agent_state" in
     ;;
 esac
 
+if [ "$sandbox_val" = "true" ]; then
+  line1_segments+=("Sandbox: On")
+else
+  line1_segments+=("Sandbox: Off")
+fi
+
+if [[ "$subagents_count" =~ ^[0-9]+$ ]] && [ "$subagents_count" -gt 0 ]; then
+  line1_segments+=("🤖 $subagents_count")
+fi
+
+# Line 2 segments (Workspace & Git)
+line2_segments=()
+
 cwd_fmt=""
 if [ -n "$cwd" ] && [ "$cwd" != "null" ]; then
   cwd_short="${cwd/#$HOME/~}"
@@ -309,7 +322,7 @@ if [ -n "$branch" ] && [ "$branch" != "null" ]; then
 fi
 
 if [ -n "$cwd_fmt" ]; then
-  line1_segments+=("$cwd_fmt")
+  line2_segments+=("$cwd_fmt")
 fi
 
 if [ "$is_git" = "true" ]; then
@@ -356,21 +369,11 @@ if [ "$is_git" = "true" ]; then
   lines_add=$(echo "$lines_stat" | cut -d'/' -f1)
   lines_del=$(echo "$lines_stat" | cut -d'/' -f2)
 
-  line1_segments+=("📝 \033[1;32m$lines_add\033[0m/\033[1;31m$lines_del\033[0m, $file_stat")
+  line2_segments+=("📝 \033[1;32m$lines_add\033[0m/\033[1;31m$lines_del\033[0m, $file_stat")
 fi
 
-if [ "$sandbox_val" = "true" ]; then
-  line1_segments+=("Sandbox: On")
-else
-  line1_segments+=("Sandbox: Off")
-fi
-
-if [[ "$subagents_count" =~ ^[0-9]+$ ]] && [ "$subagents_count" -gt 0 ]; then
-  line1_segments+=("🤖 $subagents_count")
-fi
-
-# Line 2 segments
-line2_segments=()
+# Line 3 segments (Model & Usage)
+line3_segments=()
 
 in_fmt=$(format_number "$tokens_in")
 out_fmt=$(format_number "$tokens_out")
@@ -395,18 +398,18 @@ if [ -n "$credits_rem" ] && [ "$credits_rem" != "null" ] && [ "$credits_rem" != 
 fi
 
 if [ -n "$model" ] && [ "$model" != "null" ]; then
-  line2_segments+=("${COLOR_MODEL}${model}${COLOR_RESET}")
+  line3_segments+=("${COLOR_MODEL}${model}${COLOR_RESET}")
 fi
 
 if [ -n "$usage_fmt" ]; then
-  line2_segments+=("$usage_fmt")
+  line3_segments+=("$usage_fmt")
 fi
 
 if [ "$show_tokens" = "true" ] || [ "$show_context" = "true" ] || [ "$show_credits" = "true" ]; then
   if [ "$show_context" = "true" ]; then
-    line2_segments+=("${COLOR_LABEL}context: ${COLOR_RESET}${COLOR_CONTEXT}${context_fmt}${COLOR_RESET}")
+    line3_segments+=("${COLOR_LABEL}context: ${COLOR_RESET}${COLOR_CONTEXT}${context_fmt}${COLOR_RESET}")
   elif [ "$show_tokens" = "true" ] || [ "$show_credits" = "true" ]; then
-    line2_segments+=("${COLOR_LABEL}context: ${COLOR_RESET}${COLOR_CONTEXT}--${COLOR_RESET}")
+    line3_segments+=("${COLOR_LABEL}context: ${COLOR_RESET}${COLOR_CONTEXT}--${COLOR_RESET}")
   fi
 
   if [ "$show_tokens" = "true" ]; then
@@ -425,9 +428,9 @@ if [ "$show_tokens" = "true" ] || [ "$show_context" = "true" ] || [ "$show_credi
     if [ -n "$extra_info" ]; then
       tokens_str="${tokens_str} ${COLOR_LABEL}(${COLOR_RESET}${extra_info}${COLOR_LABEL})${COLOR_RESET}"
     fi
-    line2_segments+=("$tokens_str")
+    line3_segments+=("$tokens_str")
   elif [ "$show_credits" = "true" ]; then
-    line2_segments+=("${COLOR_LABEL}token: ${COLOR_RESET}${COLOR_TOKENS}--${COLOR_RESET}")
+    line3_segments+=("${COLOR_LABEL}token: ${COLOR_RESET}${COLOR_TOKENS}--${COLOR_RESET}")
   fi
 
   if [ "$show_credits" = "true" ]; then
@@ -435,7 +438,7 @@ if [ "$show_tokens" = "true" ] || [ "$show_context" = "true" ] || [ "$show_credi
     if [[ "$credits_display" != \$* ]]; then
       credits_display="\$${credits_display}"
     fi
-    line2_segments+=("${COLOR_LABEL}$: ${COLOR_RESET}${COLOR_CREDITS}${credits_display}${COLOR_RESET}")
+    line3_segments+=("${COLOR_LABEL}$: ${COLOR_RESET}${COLOR_CREDITS}${credits_display}${COLOR_RESET}")
   fi
 fi
 
@@ -457,8 +460,21 @@ for i in "${!line2_segments[@]}"; do
   fi
 done
 
+line3_output=""
+for i in "${!line3_segments[@]}"; do
+  if [ "$i" -eq 0 ]; then
+    line3_output="${line3_segments[$i]}"
+  else
+    line3_output="$line3_output | ${line3_segments[$i]}"
+  fi
+done
+
+output="$line1_output"
 if [ -n "$line2_output" ]; then
-  echo -e "$line1_output\n$line2_output"
-else
-  echo -e "$line1_output"
+  output="$output\n$line2_output"
 fi
+if [ -n "$line3_output" ]; then
+  output="$output\n$line3_output"
+fi
+
+echo -e "$output"
