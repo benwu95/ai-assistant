@@ -210,6 +210,7 @@ OUTPUT INSTRUCTIONS (override the skill default):
     wrote to <R> (Critical=N Performance=N Maintainability=N)
   Do NOT echo the report body or any other prose.
 - Follow the skill's Report Format with sections: Summary / Changelog / Critical Issues / Performance & Optimization / Maintainability & Architecture / Good Practices Observed.
+- DO NOT include [verdict] markers (e.g. [NEEDS-FIX]) or Evidence lines in your report — those are added exclusively by the downstream verifier.
 - STRICT issue format inside Critical / Performance / Maintainability sections — the downstream verifier+splicer parses these by regex; ANY deviation breaks splice:
   * Each issue starts with a top-level bullet at column 0: `- **Issue Title**`. DO NOT use `### C1.` / `### P1.` / `### M1.` h3 headers; DO NOT prefix with C1./P1./M1. codes.
   * The first sub-bullet of every issue MUST be exactly `  - **Location**: path/to/file.py:LINE` (bold **Location**, no surrounding backticks around the path).
@@ -225,7 +226,7 @@ Run after replacing `<R>`:
 set -euo pipefail
 R="<R>"
 [[ -s "$R" ]] || { echo "REVIEWER_FAILED"; exit 1; }
-grep -qE '^## (Critical Issues|Performance & Optimization|Maintainability & Architecture)' "$R" || { echo "REVIEWER_BAD_FORMAT"; exit 1; }
+grep -qE '^#{2,3} (Critical Issues|Performance & Optimization|Maintainability & Architecture|Maintainability|Critical|Performance)' "$R" || { echo "REVIEWER_BAD_FORMAT"; exit 1; }
 echo "REVIEWER_OK round <i>"
 ```
 

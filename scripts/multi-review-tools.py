@@ -62,7 +62,7 @@ CANONICAL_ORDER = (
 
 # === Shared regexes =========================================================
 
-SECTION_RE = re.compile(r'^## (.+?)\s*$')
+SECTION_RE = re.compile(r'^#{2,3}\s+(.+?)\s*$')
 # Issue block: canonical bullet `- **Title**` OR deviant h3 `### C1. ...`
 BULLET_RE = re.compile(r'^(?:- \*\*|### )')
 # Location: bold (canonical) or plain (drift), with or without surrounding backticks
@@ -76,9 +76,25 @@ PATH_LINE_RE = re.compile(r'[A-Za-z0-9_./\-]+:\d+')
 
 # === Shared parsing primitives ==============================================
 
+SECTION_ALIASES = {
+    "Review Summary": "Summary",
+    "Overview": "Summary",
+    "Critical": "Critical Issues",
+    "Critical Bugs": "Critical Issues",
+    "Performance": "Performance & Optimization",
+    "Performance Issues": "Performance & Optimization",
+    "Maintainability": "Maintainability & Architecture",
+    "Maintainability Issues": "Maintainability & Architecture",
+    "Maintainability & Code Quality": "Maintainability & Architecture",
+    "What's Done Well": "Good Practices Observed",
+    "Good Practices": "Good Practices Observed",
+}
+
+
 def normalize_section_name(name):
     name = re.sub(r'\s+[—\-(].*$', '', name)
-    return name.strip()
+    name = name.strip()
+    return SECTION_ALIASES.get(name, name)
 
 
 def parse_file(path):
@@ -151,30 +167,19 @@ def extract_verdict_evidence(block):
 def splice_verdict_in_block(block, verdict, evidence):
     """Insert or replace [verdict] + Evidence line in a block.
 
-    If the block already has a [verdict] marker, replace it and the following
-    Evidence: line (original behavior). If the block has NO [verdict] marker
-    (e.g. iter-0 anchor copied from a pre-verifier-loop reviewer report), insert
-    [verdict] + Evidence right after the title line so the merged body carries
-    the latest-iter verdict.
+    Strips any existing [verdict] markers and Evidence: lines first to prevent
+    duplicate verdict annotations across multiple iterations.
     """
     if not block:
         return block
-    has_existing_verdict = any(VERDICT_RE.match(l) for l in block)
-    if has_existing_verdict:
-        out = []
-        state = 'pre'
-        for line in block:
-            if state == 'pre' and VERDICT_RE.match(line):
-                out.append(f"[{verdict}]")
-                state = 'await_evidence'
-                continue
-            if state == 'await_evidence' and EVIDENCE_RE.match(line):
-                out.append(evidence)
-                state = 'done'
-                continue
-            out.append(line)
-        return out
-    return [block[0], f"[{verdict}]", evidence] + block[1:]
+    cleaned = []
+    for line in block:
+        if VERDICT_RE.match(line) or EVIDENCE_RE.match(line):
+            continue
+        cleaned.append(line)
+    if not cleaned:
+        return [f"[{verdict}]", evidence]
+    return [cleaned[0], f"[{verdict}]", evidence] + cleaned[1:]
 
 
 def annotate_origin(block, iter_n):
@@ -519,8 +524,14 @@ def cmd_splice(args):
                 ann[cols[0]] = (cols[1], cols[2])
 
     used = set()
+    raw_lines = Path(args.review).read_text().splitlines()
+    filtered_lines = [
+        line for line in raw_lines
+        if not (VERDICT_RE.match(line) or EVIDENCE_RE.match(line))
+    ]
+
     out = sys.stdout
-    for line in Path(args.review).read_text().splitlines():
+    for line in filtered_lines:
         m = LOCATION_RE.search(line)
         if m and m.group(1) in ann and m.group(1) not in used:
             verdict, evidence = ann[m.group(1)]

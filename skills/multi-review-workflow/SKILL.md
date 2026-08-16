@@ -156,7 +156,8 @@ Spawn the reviewer via `invoke_subagent`:
   OUTPUT INSTRUCTIONS (override the skill default):
   - Write your final report to <R> via the write_to_file tool. DO NOT write to .tasks/<BRANCH>/review.md.
   - Your text response back to me MUST be exactly one line: wrote to <R> (Critical=N Performance=N Maintainability=N). No prose.
-  - Follow the skill's Report Format sections. 
+  - Follow the skill's Report Format sections.
+  - DO NOT include [verdict] markers (e.g., [NEEDS-FIX]) or Evidence lines in your report — those are added exclusively by the verifier.
   - STRICT issue format inside Critical / Performance / Maintainability sections:
     * Top-level bullet at column 0: `- **Issue Title**`
     * First sub-bullet MUST be exactly `  - **Location**: path/to/file.py:LINE` (bold Location, no backticks around path). Range form path:START-END and (deleted) suffix allowed.
@@ -168,7 +169,7 @@ Spawn the reviewer via `invoke_subagent`:
 set -euo pipefail
 R="<R>"
 [[ -s "$R" ]] || { echo "REVIEWER_FAILED"; exit 1; }
-grep -qE '^## (Critical Issues|Performance & Optimization|Maintainability & Architecture)' "$R" || { echo "REVIEWER_BAD_FORMAT"; exit 1; }
+grep -qE '^#{2,3} (Critical Issues|Performance & Optimization|Maintainability & Architecture|Maintainability|Critical|Performance)' "$R" || { echo "REVIEWER_BAD_FORMAT"; exit 1; }
 echo "REVIEWER_OK round <i>"
 ```
 If this outputs `REVIEWER_FAILED` or `REVIEWER_BAD_FORMAT`, inform the user and stop.
