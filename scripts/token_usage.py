@@ -32,6 +32,7 @@ def load_pricing_config() -> Dict[str, Any]:
             print(f"Warning: Failed to load pricing config from {PRICING_FILE}: {e}", file=sys.stderr)
     return {
         "models": {
+            "gemini-3.7-flash": {"input_cost_per_token": 7.5e-7, "cache_read_input_token_cost": 7.5e-8, "output_cost_per_token": 3.75e-6},
             "gemini-3.6-flash": {"input_cost_per_token": 7.5e-8, "cache_read_input_token_cost": 1.875e-8, "output_cost_per_token": 3e-7},
             "gemini-3.5-flash": {"input_cost_per_token": 7.5e-8, "cache_read_input_token_cost": 1.875e-8, "output_cost_per_token": 3e-7},
             "gemini-3.5-flash-lite": {"input_cost_per_token": 2.5e-8, "cache_read_input_token_cost": 6.25e-9, "output_cost_per_token": 1e-7},
