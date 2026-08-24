@@ -127,18 +127,22 @@ def parse_antigravity_brain_transcripts(home_dir: str) -> List[TokenEntry]:
         if conv_id in model_cache:
             return model_cache[conv_id]
         db_path = os.path.join(home_dir, ".gemini", "antigravity-cli", "conversations", f"{conv_id}.db")
-        model_name = "gemini-3.6-flash"
+        model_name = "gemini-3.7-flash"
         if os.path.exists(db_path):
+            conn = None
             try:
-                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+                try:
+                    conn = sqlite3.connect(f"file:{db_path}?immutable=1", uri=True)
+                except Exception:
+                    conn = sqlite3.connect(db_path)
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='gen_metadata'")
                 if cursor.fetchone():
                     cursor.execute("SELECT data FROM gen_metadata")
                     for row in cursor.fetchall():
                         blob = row[0]
-                        if blob and b"gemini" in blob.lower():
-                            matches = re.findall(rb"(gemini-[a-zA-Z0-9\.\-]+|gemini\s+[a-zA-Z0-9\.\-]+\s+[a-zA-Z]+)", blob, re.IGNORECASE)
+                        if blob and (b"gemini" in blob.lower() or b"claude" in blob.lower() or b"gpt" in blob.lower()):
+                            matches = re.findall(rb"(?:gemini|claude|gpt)[a-zA-Z0-9\.\-]+|(?:gemini|claude|gpt)\s+[a-zA-Z0-9\.\-]+\s+[a-zA-Z]+", blob, re.IGNORECASE)
                             if matches:
                                 found = False
                                 for match in reversed(matches):
@@ -154,9 +158,11 @@ def parse_antigravity_brain_transcripts(home_dir: str) -> List[TokenEntry]:
                                     norm_name = re.sub(r'\s*\([^)]*\)', '', raw_name).strip()
                                     model_name = re.sub(r'\s+', '-', norm_name).lower()
                                 break
-                conn.close()
             except Exception:
                 pass
+            finally:
+                if conn:
+                    conn.close()
         model_cache[conv_id] = model_name
         return model_name
 
