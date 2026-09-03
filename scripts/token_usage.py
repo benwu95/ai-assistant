@@ -32,6 +32,7 @@ def load_pricing_config() -> Dict[str, Any]:
             print(f"Warning: Failed to load pricing config from {PRICING_FILE}: {e}", file=sys.stderr)
     return {
         "models": {
+            "gemini-3.8-flash": {"input_cost_per_token": 7.5e-7, "cache_read_input_token_cost": 7.5e-8, "output_cost_per_token": 3.75e-6},
             "gemini-3.7-flash": {"input_cost_per_token": 7.5e-7, "cache_read_input_token_cost": 7.5e-8, "output_cost_per_token": 3.75e-6},
             "gemini-3.6-flash": {"input_cost_per_token": 7.5e-8, "cache_read_input_token_cost": 1.875e-8, "output_cost_per_token": 3e-7},
             "gemini-3.5-flash": {"input_cost_per_token": 7.5e-8, "cache_read_input_token_cost": 1.875e-8, "output_cost_per_token": 3e-7},
@@ -88,10 +89,24 @@ class TokenEntry:
         
         matched_rates = None
         model_lower = self.model.lower()
-        for k, v in models_map.items():
-            if k.lower() in model_lower or model_lower in k.lower():
-                matched_rates = v
-                break
+        if model_lower in models_map:
+            matched_rates = models_map[model_lower]
+        else:
+            for k, v in models_map.items():
+                if k.lower() == model_lower:
+                    matched_rates = v
+                    break
+
+        if not matched_rates:
+            candidates = []
+            for k, v in models_map.items():
+                k_lower = k.lower()
+                if k_lower in model_lower or model_lower in k_lower:
+                    candidates.append((k_lower, v))
+            if candidates:
+                candidates.sort(key=lambda item: (item[0] in model_lower, len(item[0])), reverse=True)
+                matched_rates = candidates[0][1]
+
         if not matched_rates:
             matched_rates = default_pricing
 
@@ -127,7 +142,7 @@ def parse_antigravity_brain_transcripts(home_dir: str) -> List[TokenEntry]:
         if conv_id in model_cache:
             return model_cache[conv_id]
         db_path = os.path.join(home_dir, ".gemini", "antigravity-cli", "conversations", f"{conv_id}.db")
-        model_name = "gemini-3.7-flash"
+        model_name = "gemini-3.8-flash"
         if os.path.exists(db_path):
             conn = None
             try:

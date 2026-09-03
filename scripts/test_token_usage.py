@@ -9,7 +9,8 @@ from token_usage import (
     TokenEntry,
     group_entries,
     filter_entries,
-    aggregate_by_model
+    aggregate_by_model,
+    load_pricing_config
 )
 
 class TestTokenUsage(unittest.TestCase):
@@ -153,6 +154,60 @@ class TestTokenUsage(unittest.TestCase):
         filtered = filter_entries([e1, e2], since="2026-05-15")
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0].session_id, "s2")
+
+    def test_gemini_3_8_flash_pricing(self):
+        pricing = load_pricing_config()
+        self.assertIn("gemini-3.8-flash", pricing["models"])
+        entry = TokenEntry(
+            timestamp=datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc),
+            session_id="s-gemini",
+            model="gemini-3.8-flash",
+            raw_input=10000,
+            cached_input=2000,
+            output=1000
+        )
+        # Net input: 8000 * 7.5e-7 = 0.006
+        # Cached input: 2000 * 7.5e-8 = 0.00015
+        # Output: 1000 * 3.75e-6 = 0.00375
+        # Total = 0.0099
+        cost = entry.calculate_cost(pricing)
+        self.assertAlmostEqual(cost, 0.0099, places=6)
+
+    def test_claude_fable_5_1_vs_fable_5_pricing(self):
+        pricing = load_pricing_config()
+        self.assertIn("claude-fable-5.1", pricing["models"])
+        self.assertIn("claude-fable-5-1", pricing["models"])
+        self.assertIn("claude-fable-5", pricing["models"])
+
+        entry_5_1 = TokenEntry(
+            timestamp=datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc),
+            session_id="s-claude-5-1",
+            model="claude-fable-5-1",
+            raw_input=1000,
+            cached_input=10000,
+            output=100,
+            cache_write=500,
+            cache_write_1h=200,
+            input_is_net=True
+        )
+        entry_5 = TokenEntry(
+            timestamp=datetime(2026, 9, 3, 10, 0, tzinfo=timezone.utc),
+            session_id="s-claude-5",
+            model="claude-fable-5",
+            raw_input=1000,
+            cached_input=10000,
+            output=100,
+            cache_write=500,
+            cache_write_1h=200,
+            input_is_net=True
+        )
+
+        cost_5_1 = entry_5_1.calculate_cost(pricing)
+        cost_5 = entry_5.calculate_cost(pricing)
+
+        # Fable 5.1 cache read is $0.25/M (2.5e-7), while Fable 5 is $1.00/M (1e-6)
+        # Difference on 10,000 cached read tokens: 10000 * (1e-6 - 2.5e-7) = 0.0075
+        self.assertAlmostEqual(cost_5 - cost_5_1, 0.0075, places=6)
 
 
 if __name__ == "__main__":
