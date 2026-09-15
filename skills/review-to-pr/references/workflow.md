@@ -1,9 +1,3 @@
----
-description: Sync a local review.md into the matching GitHub PR as bundled inline review comments (skipping items already covered by existing PR comments); also verifies the user's prior PR threads and offers to resolve those whose underlying issues are now fixed.
-argument-hint: [review_path]
-allowed-tools: Bash(gh:*), Bash(git:*), Bash(jq:*), Bash(cat:*), Bash(ls:*), Bash(echo:*), Bash(mkdir:*), Read, Write, Edit, AskUserQuestion
----
-
 # Review-to-PR
 
 Take the issues captured in a local `review.md` (the merged report produced by multi-review / code review) that are **not yet covered by the target PR's existing comments**, and submit them to the GitHub PR as one bundled set of inline review comments.
@@ -25,9 +19,9 @@ The flow emphasizes:
   - Otherwise auto-discover in this order:
     1. `.tasks/{currentBranch}/review-merged.md`
     2. `.tasks/{currentBranch}/review.md`
-  - Neither found → ask the user to specify a path explicitly, then abort
+  - Neither found → ask the user to specify a path explicitly; pause dependent work until supplied
 - `currentBranch`: `git rev-parse --abbrev-ref HEAD`
-- `prNumber`: from `gh pr list --head {currentBranch} --state open --json number --jq '.[0].number'`; no matching PR → notify and abort
+- `prNumber`: from `gh pr list --head {currentBranch} --state open --json number,title,url,headRefOid`; no matching PR → notify and stop; multiple matches → ask the user to select the target
 - `authUser`: `gh api user --jq .login`, the identity substituted as 「我」
 - `workDir`: `.tasks/{currentBranch}/review-to-pr/`, home of all intermediates and JSON payloads (`mkdir -p` it; follows the `.tasks/` artifact convention — not `/tmp`, which the system may clean)
 
@@ -37,14 +31,14 @@ The flow emphasizes:
 
 ### Phase 1 — Context Retrieval
 
-Run in parallel (multiple Bash tool calls in a single message):
+Resolve currentBranch first. Then run independent reads in parallel where supported; PR lookup and review-path discovery depend on currentBranch:
 
 1. `git rev-parse --abbrev-ref HEAD` → currentBranch
 2. `gh pr list --head {currentBranch} --state open --json number,title,url,headRefOid` → prNumber, headRefOid, PR URL
 3. `gh api user --jq .login` → authUser
 4. Read the review file (path per the Inputs rules)
 
-If the PR does not exist / the review file cannot be found → tell the user in one sentence and abort; do not guess.
+If the PR does not exist, report and stop. If the review file cannot be found, request its path and pause; do not guess. Verify thread findings against the PR head commit, not uncommitted local changes; use read-only commit contents or GitHub reads when the checkout differs.
 
 ### Phase 2 — Fetch existing PR comments + review threads
 
@@ -79,7 +73,8 @@ Run in parallel:
                path
                line
                originalLine
-               comments(first: 20) {
+               comments(first: 100) {
+                 pageInfo { hasNextPage endCursor }
                  nodes {
                    databaseId
                    author { login }
@@ -95,7 +90,8 @@ Run in parallel:
        --jq '.data.repository.pullRequest.reviewThreads'
    ```
    - If `pageInfo.hasNextPage == true` → continue with `-F cursor={endCursor}`
-   - Write the result to `{workDir}/pr-{prNumber}-threads.json`; Phases 3 and 4 both use it
+   - For each thread whose comments have another page, fetch the remaining comments through its thread node id with a separate cursor and append them in chronological order before classification.
+   - Combine all thread pages into one `{ "nodes": [...] }` object. Write the result to `{workDir}/pr-{prNumber}-threads.json`; Phases 3 and 4 both use it
 
 > Get owner/repo from `gh repo view --json owner,name --jq '.owner.login + "/" + .name'`.
 
@@ -117,14 +113,14 @@ jq -r '.nodes[]
   {workDir}/pr-{prNumber}-threads.json > {workDir}/pr-{prNumber}-resolve-candidates.tsv
 ```
 
-Each line: `thread_id`, `path`, `line`, `root_review_id`.
+Each line: `thread_id`, `path`, `line`, `root_review_id`. Write the approved selection to `{workDir}/pr-{prNumber}-resolve-final.tsv` with only the first three columns before executing the loop below.
 
 #### Step 3.2 — Classify each candidate
 
 Judge the current code state per candidate. Either strategy:
 
 - **Small batch (≤ 10)**: the main agent reads and compares directly, tagging each item's `verdict`
-- **Large batch (> 10)**: hand off to the `multi-review-verifier` subagent for batch verification, returning each item's `verdict`
+- **Large batch (> 10)**: optionally delegate read-only verification if the host supports subagents. Provide each worker with thread contents, PR head commit, and verdict definitions. Otherwise the main agent verifies in manageable batches. No named subagent is required; submission and resolve remain with the main agent.
 
 Each `verdict` is one of four:
 
@@ -143,7 +139,7 @@ Judgment aids:
 
 #### Step 3.3 — Preview and interaction
 
-Use **AskUserQuestion** with 4 options (consistent every round):
+Show the grouped classifications, evidence, thread links, and proposed selection before asking for approval. Offer these actions using the host’s supported interaction mechanism (a question tool if suitable, otherwise a numbered text prompt):
 
 1. **View classification** — show the candidate threads grouped by verdict, marking which are pre-checked
 2. **Adjust selection** — ask for indices + action (add to / remove from the resolve list)
@@ -156,16 +152,18 @@ Never resolve `[DISPUTED]` / `[UNFIXED]` on the user's behalf — even when ther
 
 ```bash
 while IFS=$'\t' read -r thread_id path line; do
-  gh api graphql \
+  if result=$(gh api graphql \
     -f query='mutation($id: ID!) {
       resolveReviewThread(input: {threadId: $id}) {
         thread { id isResolved }
       }
-    }' -f id="$thread_id" \
-    --jq '.data.resolveReviewThread.thread.isResolved' \
-    && echo "✓ $path:$line" \
-    || echo "✗ $path:$line"
-done < {workDir}/pr-{prNumber}-resolve-final.tsv
+    }' -f id="$thread_id") &&
+    jq -e '((.errors // []) | length) == 0 and .data.resolveReviewThread.thread.isResolved == true' <<< "$result" >/dev/null; then
+    echo "✓ $path:$line"
+  else
+    echo "✗ $path:$line"
+  fi
+done < "{workDir}/pr-{prNumber}-resolve-final.tsv"
 ```
 
 > **Note**: some shell environments lack `gh` on `$PATH` (e.g. sandboxed subshells). If calling `gh` directly fails, resolve its absolute path with `command -v gh` first; never hardcode an install path.
@@ -219,7 +217,7 @@ Each `to_post` item gets a markdown body in this style:
 
 **Length**: keep each body within ~150 Chinese characters (code blocks excluded). Code blocks show the key lines only, never a whole diff.
 
-**Language** (follow the terminology table and typography rules in `~/.ai-assistant/shared/taiwan-terminology.md`):
+**Language** (follow the terminology table and typography rules in [Taiwan terminology](taiwan-terminology.md)):
 
 - Traditional Chinese, Taiwan usage
 - Technical terms stay in English: lock / race / commit / SQS / DB session / identity map / atomic UPDATE / context manager / closure / generator, etc.
@@ -243,7 +241,7 @@ Each `to_post` item gets a markdown body in this style:
 
 ### Phase 6 — Preview & interaction loop
 
-Enter an interactive loop; **each round uses AskUserQuestion** with a fixed set of 4 options:
+Write the draft JSON payload described in Phase 7 before asking for approval, and show the target PR, comment count, and item list. Offer these actions using the host’s supported interaction mechanism (a question tool if suitable, otherwise a numbered text prompt):
 
 1. **View content** — list `to_post` as `[#N | P{level}] {file}:{line} — {title}`, one per line; then ask which full bodies to show ("all", "P0 only", "indices 1,3,5", "index 1", "skip and send"). Echo the chosen items as markdown blockquotes.
 2. **Edit content** — ask which items to change (index + what). Common patterns:
@@ -252,7 +250,7 @@ Enter an interactive loop; **each round uses AskUserQuestion** with a fixed set 
    - change the anchor line
    - shorten everything / make everything plainer
    - merge some items / split one
-   After editing, **return to the top of the loop** and re-show the main question (never auto-send).
+   After editing, update the draft payload and **return to the top of the loop** and re-show the main question (never auto-send).
 3. **Send to GitHub** — proceed to Phase 7.
 4. **Cancel** — abort. Keep the JSON payload at `{workDir}/review-to-pr-{prNumber}.json` and tell the user the path for manual follow-up.
 
@@ -262,7 +260,7 @@ Loop until the user picks Send or Cancel. **Never decide for the user**; even af
 
 ### Phase 7 — Submit
 
-Assemble all `to_post` items into a single review payload:
+Validate each comment anchor against the PR diff before preview. Use `RIGHT` for new-side lines and `LEFT` for deleted-side lines. Assemble all `to_post` items into a single review payload:
 
 ```json
 {
@@ -270,13 +268,13 @@ Assemble all `to_post` items into a single review payload:
   "event": "COMMENT",
   "body": "{overall summary: P0/P1/P2 counts and a one-line topic overview}",
   "comments": [
-    {"path": "...", "line": N, "body": "..."},
+    {"path": "...", "line": N, "side": "RIGHT", "body": "..."},
     ...
   ]
 }
 ```
 
-Write it to `{workDir}/review-to-pr-{prNumber}.json`, then:
+Keep the approved payload at `{workDir}/review-to-pr-{prNumber}.json`, then submit once:
 
 ```bash
 gh api -X POST repos/{owner}/{repo}/pulls/{prNumber}/reviews \
@@ -284,11 +282,13 @@ gh api -X POST repos/{owner}/{repo}/pulls/{prNumber}/reviews \
   --jq '{id, state, html_url, submitted_at}'
 ```
 
+If submission times out or its outcome is uncertain, inspect existing reviews and comments before retrying to avoid duplicates. Treat GraphQL `errors` or a result other than `isResolved=true` as a failed resolve, even if the CLI exits successfully.
+
 **Verify landing**:
 
 ```bash
 gh api repos/{owner}/{repo}/pulls/{prNumber}/comments --paginate \
-  --jq '[.[] | select(.pull_request_review_id == {review_id})] | length'
+  --jq '[.[] | select(.pull_request_review_id == {review_id})] | length' | jq -s 'add // 0'
 ```
 
 Report (merging Phase 3 + Phase 7 results):
@@ -300,24 +300,24 @@ Report (merging Phase 3 + Phase 7 results):
 
 ## Taiwan Terminology (mandatory)
 
-Follow the terminology table and typography rules in `~/.ai-assistant/shared/taiwan-terminology.md`.
+Follow [Taiwan terminology](taiwan-terminology.md).
 
 ---
 
 ## Constraints
 
-- **Never modify anything on the PR before submit / resolve** — Phases 1-4 are strictly read-only.
-- **Never submit a review without the user's explicit consent.** Even when `to_post` is empty, explicitly tell the user "nothing new to send" and wait for confirmation.
+- **Only the explicitly authorized Phase 3 resolve and Phase 7 submission may mutate GitHub.** All other steps are read-only on GitHub; local draft artifacts may be written.
+- **Never submit a review without the user's explicit consent.** When `to_post` is empty, report "nothing new to send" and finish with the resolve summary; no submission or additional confirmation is needed.
 - **Never resolve any thread without the user's explicit consent.** In Phase 3, `[FIXED]` / `[WONT-FIX]` verdicts only mean "pre-checked"; the mutation fires only after the user picks "Execute resolve".
-- **Never resolve threads not opened by `authUser`** — this command only handles the user's own old comments; it does not close other people's conversations.
+- **Never resolve threads not opened by `authUser`** — this skill only handles the user's own old comments; it does not close other people's conversations.
 - **Never resolve threads newly created by this run** (review_id equal to Phase 7's review id).
-- **Never re-run multi-review.** This command only syncs an existing review.md to the PR.
+- **Never re-run multi-review.** This skill only syncs an existing review.md to the PR.
 - **Never edit the local review.md.** If its content looks wrong, tell the user and let them decide whether to go back and fix it.
 - **No force push, no closing the PR, no approve / request changes, no unresolving threads.** The event type is always `COMMENT`.
 - If `gh` is unauthenticated or lacks permission → no workarounds; report the error and point the user at `gh auth login`.
-- If commit_id is stale at submit time (a new push landed while preparing) → re-fetch headRefOid and resend; bodies unchanged.
-- For large files / many issues, always `--paginate` every `gh api` call (GraphQL: follow `pageInfo.hasNextPage`).
-- Write JSON payloads to `{workDir}/` with the Write tool; don't echo large escaped strings in the shell.
+- Re-fetch the PR head before any mutation. If it changed, revalidate affected findings and anchors against the new head. Refresh the draft and obtain approval again if the approved content or targets changed; never blindly replace commit_id and resend.
+- Paginate all list reads, including nested thread comments; do not paginate mutations. Merge REST pages into one array and GraphQL thread pages into one object with a combined `nodes` array before later phases consume them.
+- Write JSON payloads to `{workDir}/` using available file tools or a JSON serializer; do not echo large escaped strings in the shell. Quote shell arguments and pass GraphQL variables as data.
 - If `$PATH` is broken (a subshell can't find `gh`), use the absolute path from `command -v gh`; never hardcode an install path.
 
 ---
@@ -328,7 +328,7 @@ Follow the terminology table and typography rules in `~/.ai-assistant/shared/tai
 |------|------|
 | review.md has no explicit P0/P1/P2 tags | no priority prefix; keep the review's ordering |
 | a review issue lacks file:line | tell the user it's skipped, list it under `skipped` with the reason |
-| a review issue's file is not in the PR diff | still try to send (GitHub falls back to a file-level comment); on API 422, mark it failed and list it |
+| a review issue has no valid inline anchor in the PR diff | list it under `skipped` with the reason; do not assume GitHub will convert it to a file-level comment |
 | one review issue spans multiple files | split into one inline comment per file, cross-linked in the bodies |
 | the PR is already closed / merged | warn the user and ask whether to send anyway (usually don't) |
 | `to_post` empty | skip the Phase 5/6 loop, but still run Phase 3 for old threads and merge into the final summary |
