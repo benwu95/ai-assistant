@@ -27,9 +27,9 @@ All files produced by skills, commands, and the system workflow are stored under
 | `review-to-pr` | skill | reads `.tasks/{currentBranch}/review-merged.md` / `review.md`; intermediates in `.tasks/{currentBranch}/review-to-pr/` |
 | `agy-search` | command | _(ephemeral temp dir, cleaned up — no persistent output)_ |
 | `token-usage` | skill / command | token usage & USD cost report table (`daily`, `weekly`, `monthly`, `session`) |
-| `system.md` | workflow | `.tasks/{currentBranch}/todo.md`, `.tasks/{currentBranch}/lessons.md` |
+| `system.md` | workflow | `.tasks/{currentBranch}/todo.md`, `.tasks/lessons.md` (repo-level) |
 
-When adding a new skill or command that writes files, follow the same convention: resolve `currentBranch` via `git rev-parse --abbrev-ref HEAD` and write to `.tasks/{currentBranch}/<artifact>.md`.
+When adding a new skill or command that writes files, follow the same convention: resolve `currentBranch` via `git rev-parse --abbrev-ref HEAD` and write to `.tasks/{currentBranch}/<artifact>.md`. The exception is `lessons.md`, which lives at `.tasks/lessons.md` (repo-level): self-improvement notes must persist across branches, so they are deliberately not scoped to `{currentBranch}`.
 
 The `review-to-pr` skill is shared by Claude Code, Codex, and Antigravity (agy). Ask the assistant to use `review-to-pr` with an optional review report path; the installer links the shared `skills/` directory for each CLI.
 
