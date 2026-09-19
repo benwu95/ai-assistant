@@ -113,6 +113,13 @@ If the harness auto-surfaces skill descriptions, follow those. Otherwise match t
 
 ---
 
+## Git & Commits
+
+- **Commit title**: Follow Conventional Commits — `type(scope): summary` (e.g. `feat`, `fix`, `refactor`, `docs`, `chore`, `test`). Scope optional; summary in imperative mood, lowercase, no trailing period.
+- **Commit description**: Use a bullet list — one line per logical change, stating what changed and, where non-obvious, why.
+
+---
+
 ## Success Criteria
 
 These guidelines are working if:
