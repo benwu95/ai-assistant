@@ -2,6 +2,13 @@
 
 Single source of truth for the structured code-review report, shared by the `code-reviewer` agent and the `python-code-review` skill.
 
+## Finding Admission
+
+Apply before routing any finding into the report.
+- **Review against stated intent**: Read the PR description and linked decision records first. Items listed as out of scope, deferred to follow-up tickets, or already decided are not findings, even when the adjacent risk is real; a gap in such a decision is reported as a question for a human, not a bug. Point-in-time records (archived specs, change proposals) are not flagged as stale.
+- **Grade by triggerability**: For each finding, establish (1) the mechanism exists in the code, (2) it can be triggered under the current callers and deployment — grep the callers and list the required preconditions, (3) the actual consequence when triggered. Only findings satisfying (2) go into Critical Issues; a mechanism that cannot be triggered today is mentioned in the Summary at most. A probe with injected errors or shortened deadlines proves the mechanism, not its frequency — say which one the evidence shows.
+- **Count the cost of the fix**: When the suggested fix makes the design more complex or opens new edge cases, state that cost alongside the finding.
+
 ## Location Convention
 
 All `Location` fields use this format: `path/to/file:LINE` (or `:START-END` for ranges).
