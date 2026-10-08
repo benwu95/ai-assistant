@@ -25,38 +25,12 @@ All files produced by skills, commands, and the system workflow are stored under
 | `sqlalchemy-with-postgresql` | skill | _(knowledge-only, no file output)_ |
 | `multi-review` | command | `.tasks/{currentBranch}/review.md` + `.tasks/{currentBranch}/review/{timestamp}/` |
 | `review-to-pr` | skill | reads `.tasks/{currentBranch}/review-merged.md` / `review.md`; intermediates in `.tasks/{currentBranch}/review-to-pr/` |
-| `token-usage` | skill / command | token usage & USD cost report table (`daily`, `weekly`, `monthly`, `session`) |
 | `system.md` | workflow | `.tasks/{currentBranch}/todo.md`, `.tasks/lessons.md` (repo-level) |
 
 When adding a new skill or command that writes files, follow the same convention: resolve `currentBranch` via `git rev-parse --abbrev-ref HEAD` and write to `.tasks/{currentBranch}/<artifact>.md`. The exception is `lessons.md`, which lives at `.tasks/lessons.md` (repo-level): self-improvement notes must persist across branches, so they are deliberately not scoped to `{currentBranch}`.
 
 The `review-to-pr` skill is shared by Claude Code, Codex, and Antigravity (agy). Ask the assistant to use `review-to-pr` with an optional review report path; the installer links the shared `skills/` directory for each CLI.
 
-## Token Usage
-
-The `token-usage` skill calculates and aggregates token usage and estimated cost metrics from local CLI conversation logs.
-
-**Supported Agents / CLIs:** `antigravity`, `claude`, `codex`, `copilot`
-
-**Usage Examples (in chat):**
-- `/token-usage` (defaults to daily aggregation for all sources)
-- `/token-usage since 2026-07-01`
-- `/token-usage weekly --source claude`
-- `/token-usage monthly --last 3 --by-model`
-
-**Available Options:**
-- **Aggregation mode**: `daily` (default), `weekly`, `monthly`, or `session`
-- `--source <name>`: Filter by source (`antigravity`, `claude`, `codex`, `copilot`, `all`)
-- `--since YYYY-MM-DD` / `--until YYYY-MM-DD`: Filter by date range
-- `--last N`: Limit output to the last N periods
-- `--by-model`: Aggregate the whole window into one per-model table instead of per-period rows
-- `--compact`: Collapse each period to a single aggregate row instead of one row per model
-- `--no-cost`: Omit USD cost calculation
-- `--json`: Output raw JSON data
-
-The default report prints one row per model within each period — `Date | Model | Input | Cache | Output | Total | Cost`, where `Cache` sums CacheWrite and CacheRead — with the period label shown once on its first model row.
-
-*(Note: Pricing rates are configured in `shared/token-pricing.json`.)*
 ## Setup
 
 **Prerequisites:** `git`; on Windows, creating symlinks requires Developer Mode (Settings > Privacy & security > For developers) or running PowerShell as Administrator.
