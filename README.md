@@ -25,7 +25,6 @@ All files produced by skills, commands, and the system workflow are stored under
 | `sqlalchemy-with-postgresql` | skill | _(knowledge-only, no file output)_ |
 | `multi-review` | command | `.tasks/{currentBranch}/review.md` + `.tasks/{currentBranch}/review/{timestamp}/` |
 | `review-to-pr` | skill | reads `.tasks/{currentBranch}/review-merged.md` / `review.md`; intermediates in `.tasks/{currentBranch}/review-to-pr/` |
-| `agy-search` | command | _(ephemeral temp dir, cleaned up — no persistent output)_ |
 | `token-usage` | skill / command | token usage & USD cost report table (`daily`, `weekly`, `monthly`, `session`) |
 | `system.md` | workflow | `.tasks/{currentBranch}/todo.md`, `.tasks/lessons.md` (repo-level) |
 
