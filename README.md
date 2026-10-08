@@ -7,11 +7,12 @@ Custom agents, skills, commands, and scripts for AI coding assistants.
 ```
 agents/          Specialized subagent definitions
 commands/        Slash command definitions
-scripts/         Supporting shell/Python scripts
+scripts/         Supporting Python scripts
 shared/          Shared resources (e.g. terminology)
-skills/          Skill definitions (branch-diff, review-to-pr, python-code-review, sqlalchemy-with-postgresql)
+skills/          Skill definitions shared by every supported CLI
 statusline/      Status line scripts for CLI harnesses
 system.md        Global system prompt
+AGENTS.md        Rules for editing this repo's prompts and skills
 ```
 
 ## Generated Artifacts
@@ -24,12 +25,13 @@ All files produced by skills, commands, and the system workflow are stored under
 | `python-code-review` | skill | `.tasks/{currentBranch}/review.md` |
 | `sqlalchemy-with-postgresql` | skill | _(knowledge-only, no file output)_ |
 | `multi-review` | command | `.tasks/{currentBranch}/review.md` + `.tasks/{currentBranch}/review/{timestamp}/` |
+| `multi-review-workflow` | skill | `.tasks/{currentBranch}/review.md` + `.tasks/{currentBranch}/review/{timestamp}/` |
 | `review-to-pr` | skill | reads `.tasks/{currentBranch}/review.md`; intermediates in `.tasks/{currentBranch}/review-to-pr/` |
 | `system.md` | workflow | `.tasks/{currentBranch}/todo.md`, `.tasks/lessons.md` (repo-level) |
 
 When adding a new skill or command that writes files, follow the same convention: resolve `currentBranch` via `git rev-parse --abbrev-ref HEAD` and write to `.tasks/{currentBranch}/<artifact>.md`. The exception is `lessons.md`, which lives at `.tasks/lessons.md` (repo-level): self-improvement notes must persist across branches, so they are deliberately not scoped to `{currentBranch}`.
 
-The `review-to-pr` skill is shared by Claude Code, Codex, and Antigravity (agy). Ask the assistant to use `review-to-pr` with an optional review report path; the installer links the shared `skills/` directory for each CLI.
+The `review-to-pr` skill is shared across every supported CLI. Ask the assistant to use `review-to-pr` with an optional review report path; the installer links the shared `skills/` directory for each CLI.
 
 ## Setup
 
