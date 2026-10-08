@@ -80,7 +80,7 @@ The output language is **Traditional Chinese (Taiwan)** with technical terms kep
 
 ## 改動內容
 
-{先以 1–2 句話點出此分支的整體變動主題與目的，緊接著以**巢狀條列**方式列出 3–6 個關鍵改動主題；每個主題用粗體標題，下面再以 2–4 個子條列拆解該主題的具體細項與設計理由。**不要把細項全部塞在同一句**——主題下方的子條列才是讓 reviewer 能快速掃讀的關鍵。聚焦「做了什麼、為何而做」，不逐一列 commit。}
+{先以 1–2 句話點出此分支的整體變動主題與目的，緊接著以**巢狀條列**方式列出 3–6 個關鍵改動主題；每個主題用粗體標題，下面再以 2–4 個子條列拆解該主題的具體細項與設計理由，讓 reviewer 能快速掃讀。聚焦「做了什麼、為何而做」，不逐一列 commit。}
 
 - **{主題一}**：
   - {子細項 a：具體變動 1 + 動機}
@@ -93,20 +93,6 @@ The output language is **Traditional Chinese (Taiwan)** with technical terms kep
   - {子細項 a}
   - {子細項 b}
 - ...
-
-**反例（不要這樣寫）**：
-```
-- **主題**：細項 a、細項 b、細項 c，連帶細項 d（理由），同時細項 e
-```
-這種寫法把所有細節擠在一個長句裡，reviewer 難以區分主從、無法快速掃讀。
-
-**正例**：
-```
-- **主題**：
-  - 細項 a：具體內容 + 動機
-  - 細項 b：具體內容 + 動機
-  - 細項 c：具體內容 + 動機
-```
 
 ---
 
@@ -213,7 +199,7 @@ The output language is **Traditional Chinese (Taiwan)** with technical terms kep
 - **Quantify**: bring in commit counts, file counts, line counts, query counts wherever possible
 - **No auto-dropping sections**: if migrations / new models changed, their sections are mandatory; with no changes, omit the whole section
 - **Tables first**: fields, endpoints, SHAs and other structured data go in tables, not long bullet lists
-- **No emotional language** or marketing copy (e.g. 「全面升級」「強大功能」)
+- **No emotional language** or marketing copy
 - **Closing 「設計重點總結」**: 3–5 points calling out cross-cutting concerns — mutual exclusion, performance, concurrency, authorization, events
 - If the branch has no changes at all, or only merge commits, write 「無實質差異」 to `outputPath` and stop
 
@@ -222,7 +208,7 @@ The output language is **Traditional Chinese (Taiwan)** with technical terms kep
 Confirm each item before writing the file:
 
 - [ ] the numbers from `git diff --stat` match the document header
-- [ ] 「改動內容」 contains a 1–2 sentence overview plus 3–6 bold themes, each broken into 2–4 **nested sub-bullets** (never cram the details into one long sentence)
+- [ ] 「改動內容」 contains a 1–2 sentence overview plus 3–6 bold themes, each broken into 2–4 **nested sub-bullets**
 - [ ] every new or heavily modified file is mentioned in some section
 - [ ] test files are grouped by type with no new test missed
 - [ ] 「設計重點總結」 echoes decisions visible in the actual diff — no fabrication

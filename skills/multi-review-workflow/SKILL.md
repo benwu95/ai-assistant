@@ -16,7 +16,7 @@ All Chinese output follows the terminology table and typography rules in `~/.ai-
 
 Extract these from the user's request (or use defaults):
 - `BASE`: The base branch to compare against (default `main`)
-- `MAX_ITER`: Maximum iterations (default `3`, hard cap `5`. If user requests > 5, refuse and cap at 5.)
+- `MAX_ITER`: Maximum iterations (default `3`, hard cap `5`. If user requests > 5, refuse and tell the user the cap is 5.)
 - `REVIEWER_MODEL`: (optional) model to pass to the reviewer subagent.
 - `VERIFIER_MODEL`: (optional) model to pass to the verifier subagent.
 

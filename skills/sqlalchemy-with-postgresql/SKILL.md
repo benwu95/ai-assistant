@@ -16,7 +16,6 @@ Prioritize evaluation in this order:
 3. **Schema Topology Scan**: Utilize the long context window to read **all relevant model definitions**. Verify relationship names and `back_populates` symmetry across different files.
 4. **Data Consistency**: Atomic transactions and proper handling of the Identity Map.
 5. **PostgreSQL Specifics**: Using native types (JSONB/ARRAY) correctly over generic Blobs.
-6. **No Foreign Key (Application-Level References)**: No `ForeignKey` except for many-to-many mapping tables. Use column `doc` to document references.
 
 ## Anti-Patterns (NEVER List)
 
@@ -26,7 +25,7 @@ Prioritize evaluation in this order:
 - **NEVER** assume relationship attributes are updated automatically if the entity already exists in the Session without `populate_existing=True`.
 - **NEVER** perform blocking I/O (like `requests` or `time.sleep`) inside an async repository method.
 - **NEVER** share a single `AsyncSession` across concurrent tasks (`asyncio.gather`, `TaskGroup`, `asyncio.create_task`). `AsyncSession` is **not task-safe** — its underlying connection serves one query at a time. Concurrent usage raises `InvalidRequestError: This session is provisioning a new connection; concurrent operations are not permitted` or `asyncpg.InterfaceError: another operation is in progress`. Either merge into a single statement (`IN (...)`), or give each task its own session from the `async_sessionmaker`.
-- **NEVER** use `session.add()` in a loop for >100 records; use `insert().values([...])` or `bulk_insert_mappings`.
+- **NEVER** use `session.add()` in a loop for >100 records; use `insert().values([...])`.
 - **NEVER** use generic `JSON` type for PostgreSQL; use `sqlalchemy.dialects.postgresql.JSONB` for indexing and operator support.
 - **NEVER** pass raw strings for `UUID` or `INET` columns when using `asyncpg`; ensure proper Python object conversion (e.g., `uuid.UUID(val)`) first.
 - **NEVER** access relationship attributes outside of an active session transaction in async mode.
@@ -170,7 +169,7 @@ await raw_conn.driver_connection.copy_records_to_table(
 Migrations run while the **old app version is still serving traffic**. The old code and the new schema MUST coexist.
 
 1. **Online-safe & backward-compatible** — never apply a schema change the currently-running app version cannot tolerate.
-2. **Add columns the non-blocking way** — `nullable=True` or with a server default; backfill in a separate step. On PG 11+ a *constant* server default is metadata-only (no table rewrite); a *volatile* default (e.g. per-row `now()`) or adding `NOT NULL` without a default forces a full rewrite under a long-held `ACCESS EXCLUSIVE` lock on large tables — avoid those.
+2. **Add columns the non-blocking way** — `nullable=True` or with a server default; backfill in a separate step. On PG 11+ a *constant* server default is metadata-only (no table rewrite); a *volatile* default (e.g. per-row `now()`) forces a full rewrite under a long-held `ACCESS EXCLUSIVE` lock on large tables — avoid those.
 3. **Build indexes with `CREATE INDEX CONCURRENTLY`** — in Alembic, run it via `op.execute(...)` and mark that migration to NOT run inside a transaction (`CONCURRENTLY` cannot run in a transaction block).
 4. **Destructive changes (drop / rename column) use expand-contract** — expand first (add new column / dual-write), switch all readers and writers, then contract (drop the old column) in a *later* release. Never drop or rename a column the old running version still reads, in the same PR.
 5. **Migrations use their own `NullPool` engine**, not the application pool (see the single-engine NEVER rule above).
@@ -188,7 +187,7 @@ Migrations run while the **old app version is still serving traffic**. The old c
 | **Many-to-One** | `joinedload` | SQL JOIN is efficient for single-row parent loading. |
 | **One-to-Many** | `selectinload` | Avoids Cartesian product; uses a clean second IN query. |
 | **Large Write Ops** | Core `insert()` | Bypasses ORM overhead/Identity Map management. |
-| **Deep Pagination** | Keyset (Seek Method) | `OFFSET` is O(N²) for deep pages in PostgreSQL. |
+| **Deep Pagination** | Keyset (Seek Method) | `OFFSET` scans and discards every skipped row, so its cost grows with page depth. |
 
 ## Error Handling
 - Catch `sqlalchemy.exc.IntegrityError` specifically for unique/foreign key violations.

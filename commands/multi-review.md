@@ -34,7 +34,7 @@ Steps 4-9 form the review loop. Step 9's bash output contains `SIGNAL=CONVERGED`
 - 4th positional → `VERIFIER_MODEL` (optional; must be an alias: opus/sonnet/haiku)
 
 If `MAX_ITER > 5`, refuse and tell the user the cap is 5.
-If the user passes a full model id (e.g. `claude-opus-4-8`), refuse and suggest an alias instead.
+If the user passes a full model id, refuse and suggest an alias instead.
 
 Tell the user the resolved parameters, then start.
 
@@ -212,7 +212,7 @@ OUTPUT INSTRUCTIONS (override the skill default):
 - Follow the skill's Report Format with sections: Summary / Changelog / Critical Issues / Performance & Optimization / Maintainability & Architecture / Good Practices Observed.
 - DO NOT include [verdict] markers (e.g. [NEEDS-FIX]) or Evidence lines in your report — those are added exclusively by the downstream verifier.
 - STRICT issue format inside Critical / Performance / Maintainability sections — the downstream verifier+splicer parses these by regex; ANY deviation breaks splice:
-  * Each issue starts with a top-level bullet at column 0: `- **Issue Title**`. DO NOT use `### C1.` / `### P1.` / `### M1.` h3 headers; DO NOT prefix with C1./P1./M1. codes.
+  * Each issue starts with a top-level bullet at column 0: `- **Issue Title**`.
   * The first sub-bullet of every issue MUST be exactly `  - **Location**: path/to/file.py:LINE` (bold **Location**, no surrounding backticks around the path).
   * Range form `path:START-END` is allowed; ` (deleted)` suffix is allowed; nothing else may wrap the path."
 })

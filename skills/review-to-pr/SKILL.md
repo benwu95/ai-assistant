@@ -9,7 +9,7 @@ Use this workflow in Claude Code, Codex, or Antigravity (agy) with the host's av
 
 ## Inputs and requirements
 
-- Optional `review_path`: accept a path supplied in the user's message or skill arguments. Otherwise look for `.tasks/{currentBranch}/review-merged.md`, then `.tasks/{currentBranch}/review.md`.
+- Optional `review_path`: accept a path supplied in the user's message or skill arguments. Otherwise use `.tasks/{currentBranch}/review.md`.
 - Require a Git checkout, `git`, authenticated `gh` with access to the target repository, and `jq` for the command examples.
 - Store intermediate files and draft payloads in `.tasks/{currentBranch}/review-to-pr/`.
 - If a required input or capability is missing, explain what is missing and pause dependent work.

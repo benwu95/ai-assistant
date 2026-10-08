@@ -54,7 +54,7 @@ Read `~/.ai-assistant/shared/code-quality-principles.md` and evaluate changes ag
 
 ### Python-Specific Pitfalls
 - **Mutable Default Arguments**: Check `def func(a=[])`. This is a classic trap where the list persists across calls.
-- **Exception Masking**: Look for `except Exception: pass` or `except:`. Ensure specific exceptions are caught.
+- **Exception Masking**: Look for `except Exception: pass`, `except BaseException`, or bare `except:`. Ensure specific exceptions are caught.
 - **AsyncIO Blocking**: Search for `time.sleep()`, `requests.get()`, or heavy CPU tasks inside `async` defs. These stall the entire event loop.
 - **Private-named staticmethod**: A `@staticmethod` is effectively a public function; flag `_`-prefixed staticmethods. Private semantics belong in an instance method or a module-level `_helper`. Likewise flag `ABC` as a base class when the class declares no `@abstractmethod`.
 - **Closure Late Binding**: Check if lambdas or nested functions in loops capture the loop variable correctly.
@@ -67,15 +67,12 @@ Read `~/.ai-assistant/shared/code-quality-principles.md` and evaluate changes ag
 ### SQL & ORM Performance
 use skill `/sqlalchemy-with-postgresql` to review
 - **Hidden N+1**: Look beyond simple loops. Check if `__repr__` or properties access un-fetched relationships.
-- **Pagination Anti-patterns**: `OFFSET` is $O(N^2)$ for deep pages. Recommend **Keyset Pagination** (seek method) for large datasets.
+- **Pagination Anti-patterns**: `OFFSET` scans and discards every skipped row, so its cost grows with page depth. Recommend **Keyset Pagination** (seek method) for large datasets.
 - **Transaction Scope**: Identify transactions that are too long (causing locks) or too short (losing atomicity).
 
 ## Anti-Patterns (NEVER List)
 
-- **NEVER** use `eval()`, `exec()`, or `input()` without extreme sandboxing.
-- **NEVER** use mutable objects (list, dict, set) as default argument values.
-- **NEVER** catch `BaseException` or a bare `except:`.
-- **NEVER** use `time.sleep()` in an `asyncio` context; use `await asyncio.sleep()`.
+- **NEVER** use `eval()` or `exec()` without extreme sandboxing.
 - **NEVER** perform heavy IO or blocking calls in a `__init__` or `__del__` method.
 - **NEVER** handle `json.loads()` or external API responses without explicit `try-except` blocks for `KeyError`, `ValueError`, or `TypeError`.
 - **NEVER** ignore type hints in public APIs

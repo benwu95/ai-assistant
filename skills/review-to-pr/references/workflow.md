@@ -6,7 +6,6 @@ Additionally: **before posting new comments, inspect the PR's review threads ope
 
 The flow emphasizes:
 - **No auto-fixing files, no auto-submitting** — the user must see a preview and explicitly agree before anything is sent
-- **No auto-resolving threads** — even when an item shows as fixed, the user must confirm before the `resolveReviewThread` mutation runs
 - Each comment body is bulleted, written in Traditional Chinese (Taiwan) with technical terms kept in English
 - When quoting existing PR commenters: if that user is the current gh CLI auth account, rewrite as 「我」; otherwise keep `@username`
 
@@ -16,10 +15,8 @@ The flow emphasizes:
 
 - `review_path` (positional, optional): path of the review report to read
   - If the user passes an argument, use that path
-  - Otherwise auto-discover in this order:
-    1. `.tasks/{currentBranch}/review-merged.md`
-    2. `.tasks/{currentBranch}/review.md`
-  - Neither found → ask the user to specify a path explicitly; pause dependent work until supplied
+  - Otherwise use `.tasks/{currentBranch}/review.md`
+  - Not found → ask the user to specify a path explicitly; pause dependent work until supplied
 - `currentBranch`: `git rev-parse --abbrev-ref HEAD`
 - `prNumber`: from `gh pr list --head {currentBranch} --state open --json number,title,url,headRefOid`; no matching PR → notify and stop; multiple matches → ask the user to select the target
 - `authUser`: `gh api user --jq .login`, the identity substituted as 「我」
@@ -133,8 +130,6 @@ Each `verdict` is one of four:
 
 Judgment aids:
 - Every comment in the thread is `authUser`'s own with no author reply → most likely `[UNFIXED]` or `[FIXED]`, decided by the code state
-- The author's last reply contains "fixed" / "done" / "removed" / "updated" / "many thanks" or similar → verify the code, then mark `[FIXED]`
-- The author's reply gives an explicit design trade-off ("current AC doesn't support it", "revisit when multi-file lands", etc.) → `[WONT-FIX]`
 - Exclude threads the user just submitted within this very flow — their `root_review_id` equals the review id Phase 7 is about to create (nonexistent at Phase 3 time, nothing to handle); but leftovers from a previous same-purpose review payload, still unresolved, do become candidates and their verdicts decide
 
 #### Step 3.3 — Preview and interaction
@@ -145,8 +140,6 @@ Show the grouped classifications, evidence, thread links, and proposed selection
 2. **Adjust selection** — ask for indices + action (add to / remove from the resolve list)
 3. **Execute resolve** — batch `resolveReviewThread` on the currently selected threads
 4. **Skip resolve step** — resolve nothing, go straight to Phase 4
-
-Never resolve `[DISPUTED]` / `[UNFIXED]` on the user's behalf — even when there are only a few, the user must add them explicitly.
 
 #### Step 3.4 — Execute resolve (user picks 3)
 
@@ -165,8 +158,6 @@ while IFS=$'\t' read -r thread_id path line; do
   fi
 done < "{workDir}/pr-{prNumber}-resolve-final.tsv"
 ```
-
-> **Note**: some shell environments lack `gh` on `$PATH` (e.g. sandboxed subshells). If calling `gh` directly fails, resolve its absolute path with `command -v gh` first; never hardcode an install path.
 
 Afterwards report `resolved=N failed=M` and list the failed path:line entries (usually a thread someone else resolved first, or network issues).
 
@@ -220,7 +211,7 @@ Each `to_post` item gets a markdown body in this style:
 **Language** (follow the terminology table and typography rules in [Taiwan terminology](taiwan-terminology.md)):
 
 - Traditional Chinese, Taiwan usage
-- Technical terms stay in English: lock / race / commit / SQS / DB session / identity map / atomic UPDATE / context manager / closure / generator, etc.
+- Technical terms stay in English
 - Inline code / paths / identifiers in backticks
 - **Half-width spaces around English words in mixed text** (e.g. `獨立 Session 審查機制`, `改用 SELECT FOR UPDATE`)
 - Full-width punctuation (，。、：；「」); half-width punctuation is acceptable around English proper nouns
@@ -236,7 +227,6 @@ Each `to_post` item gets a markdown body in this style:
 **Code block rules**:
 - Wrap Python code in ```` ```python ````
 - Normal indentation
-- Don't Python-escape `}}` inside f-strings; write it as-is
 - Mind JSON escaping when strings contain Chinese (handled at payload-generation time)
 
 ### Phase 6 — Preview & interaction loop
