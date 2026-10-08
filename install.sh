@@ -68,6 +68,19 @@ cli_installed() {
     [ -d "$1" ]
 }
 
+ignore_tasks_globally() {
+    # .tasks/ holds agent working notes (see system.md) and must never be committed in any repo
+    local excludes
+    excludes="$(git config --global --path core.excludesFile || true)"
+    [ -n "$excludes" ] || excludes="${XDG_CONFIG_HOME:-$HOME/.config}/git/ignore"
+    if grep -qxE '/?\.tasks/?' "$excludes" 2>/dev/null; then
+        return
+    fi
+    mkdir -p "$(dirname "$excludes")"
+    echo '.tasks/' >> "$excludes"
+    echo "  added .tasks/ to $excludes"
+}
+
 print_recommended_plugins() {
     # echo the "## Recommended Plugins" section straight from the README
     # (single source of truth), stripping code-fence lines for the terminal
@@ -168,6 +181,9 @@ fi
 for cli in $selected; do
     "link_$cli"
 done
+
+echo "Git:"
+ignore_tasks_globally
 
 echo "Done."
 print_recommended_plugins

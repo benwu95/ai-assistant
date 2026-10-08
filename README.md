@@ -16,7 +16,7 @@ system.md        Global system prompt
 
 ## Generated Artifacts
 
-All files produced by skills, commands, and the system workflow are stored under the **`.tasks/{currentBranch}/`** directory of the target repository (resolved per current git branch). This keeps generated artifacts colocated with the branch they describe and isolated from source code.
+All files produced by skills, commands, and the system workflow are stored under the **`.tasks/{currentBranch}/`** directory of the target repository (resolved per current git branch). This keeps generated artifacts colocated with the branch they describe and isolated from source code. The installers add `.tasks/` to the global git excludes file (`core.excludesFile`, defaulting to `~/.config/git/ignore`) so it never gets committed.
 
 | Producer | Type | Output Path |
 |---|---|---|

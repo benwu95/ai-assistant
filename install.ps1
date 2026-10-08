@@ -132,6 +132,28 @@ function Link-Copilot {
     New-Link (Join-Path $AiHome 'skills')    (Join-Path $HOME '.agents\skills')   # shared with Codex CLI
 }
 
+function Add-TasksToGlobalIgnore {
+    # .tasks/ holds agent working notes (see system.md) and must never be committed in any repo
+    $excludes = $null
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        $excludes = git config --global --path core.excludesFile
+    }
+    if (-not $excludes) {
+        $configHome = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME '.config' }
+        $excludes = Join-Path $configHome 'git\ignore'
+    }
+    if ((Test-Path -LiteralPath $excludes) -and
+        (Select-String -LiteralPath $excludes -Pattern '^/?\.tasks/?$' -Quiet)) {
+        return
+    }
+    $parent = Split-Path -Parent $excludes
+    if (-not (Test-Path -LiteralPath $parent)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    Add-Content -LiteralPath $excludes -Value '.tasks/'
+    Write-Host "  added .tasks/ to $excludes"
+}
+
 function Show-RecommendedPlugins {
     # echo the "## Recommended Plugins" section straight from the README
     # (single source of truth), stripping code-fence lines for the terminal
@@ -200,6 +222,9 @@ if ($RepoRoot -ne $AiHome) {
 foreach ($c in ($selected | Select-Object -Unique)) {
     & $LinkFn[$c]
 }
+
+Write-Host 'Git:'
+Add-TasksToGlobalIgnore
 
 Write-Host 'Done.'
 Show-RecommendedPlugins
