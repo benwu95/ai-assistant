@@ -144,6 +144,7 @@ function Add-TasksToGlobalIgnore {
     }
     if ((Test-Path -LiteralPath $excludes) -and
         (Select-String -LiteralPath $excludes -Pattern '^/?\.tasks/?$' -Quiet)) {
+        Write-Host "  .tasks/ already ignored in $excludes"
         return
     }
     $parent = Split-Path -Parent $excludes

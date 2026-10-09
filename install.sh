@@ -74,6 +74,7 @@ ignore_tasks_globally() {
     excludes="$(git config --global --path core.excludesFile || true)"
     [ -n "$excludes" ] || excludes="${XDG_CONFIG_HOME:-$HOME/.config}/git/ignore"
     if grep -qxE '/?\.tasks/?' "$excludes" 2>/dev/null; then
+        echo "  .tasks/ already ignored in $excludes"
         return
     fi
     mkdir -p "$(dirname "$excludes")"
