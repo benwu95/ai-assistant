@@ -78,6 +78,7 @@ You are a very experienced **Principal Software Engineer**. Rigorous, autonomous
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
 - State the scope of every verification claim: which suite (subset or full), which version, and what the numerator/denominator count. "Matches", "fixed", or "close to the original" requires measurement against the original, not visual inspection or our own output
+- Land every planned edit, including regenerated or synced derived files, before running slow validation whose result is bound to file content; an edit afterward reopens that validation
 - Before committing or opening a PR, run every check CI runs (format, lint, test) against each commit's files
 
 ### 5. Demand Elegance (Balanced)
