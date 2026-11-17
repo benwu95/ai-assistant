@@ -26,28 +26,45 @@ cycle_mode="default"
 
 parse_payload() {
   jq -r '
+  def find_bucket($entries; $pat; $win):
+    [ $entries[] | select((.key | ascii_downcase | test($pat)) and (.key | ascii_downcase | contains($win))) | .value ][0];
+  def find_generic_g4($entries; $win):
+    [ $entries[] | select((.key | ascii_downcase | test("gemini-?4")) and (.key | ascii_downcase | test("argon|hydrogen|carbon") | not) and (.key | ascii_downcase | contains($win))) | .value ][0];
+  def resolve_quota($entries; $m_lower; $win):
+    if ($m_lower | test("hydrogen|carbon|argon")) then
+      (($m_lower | capture("(?<v>hydrogen|carbon|argon)").v)) as $v |
+      (find_bucket($entries; $v; "5h")) as $v5 |
+      (find_bucket($entries; $v; "weekly")) as $vw |
+      if ($v5 != null or $vw != null) then
+        (if $win == "5h" then ($v5 // {}) else ($vw // {}) end)
+      else
+        (find_generic_g4($entries; "5h")) as $g5 |
+        (find_generic_g4($entries; "weekly")) as $gw |
+        if ($g5 != null or $gw != null) then
+          (if $win == "5h" then ($g5 // {}) else ($gw // {}) end)
+        else
+          (.quota["gemini-" + $win] // .quota["3p-" + $win] // {})
+        end
+      end
+    elif ($m_lower | test("gemini[- ]?4")) then
+      (find_generic_g4($entries; "5h")) as $g5 |
+      (find_generic_g4($entries; "weekly")) as $gw |
+      if ($g5 != null or $gw != null) then
+        (if $win == "5h" then ($g5 // {}) else ($gw // {}) end)
+      else
+        (.quota["gemini-" + $win] // .quota["3p-" + $win] // {})
+      end
+    elif ($m_lower | contains("gemini") | not) or ($m_lower | test("claude|gpt|fable|mythos|opus|sonnet|haiku|glm|ark")) then
+      (.quota["3p-" + $win] // .quota["gemini-" + $win] // {})
+    else
+      (.quota["gemini-" + $win] // .quota["3p-" + $win] // {})
+    end;
   ((.agent_state // .state // "idle")) as $st |
   ((.model.display_name // .model.id // "")) as $m |
   (((.model.id // "") + " " + (.model.display_name // "")) | ascii_downcase) as $m_lower |
   ((.quota // {}) | to_entries) as $q_entries |
-  ([ $q_entries[] | select((.key | ascii_downcase | test("argon|gemini-?4")) and (.key | ascii_downcase | contains("5h"))) | .value ][0]) as $argon_q5 |
-  ([ $q_entries[] | select((.key | ascii_downcase | test("argon|gemini-?4")) and (.key | ascii_downcase | contains("weekly"))) | .value ][0]) as $argon_qw |
-  (if ($m_lower | test("argon|gemini[- ]?4")) then
-     (if ($argon_q5 != null or $argon_qw != null) then ($argon_q5 // {})
-      else (.quota["gemini-5h"] // .quota["3p-5h"] // {}) end)
-   elif ($m_lower | contains("gemini") | not) or ($m_lower | test("claude|gpt|fable|mythos|opus|sonnet|haiku|glm|ark")) then
-     (.quota["3p-5h"] // .quota["gemini-5h"] // {})
-   else
-     (.quota["gemini-5h"] // .quota["3p-5h"] // {})
-   end) as $q5 |
-  (if ($m_lower | test("argon|gemini[- ]?4")) then
-     (if ($argon_q5 != null or $argon_qw != null) then ($argon_qw // {})
-      else (.quota["gemini-weekly"] // .quota["3p-weekly"] // {}) end)
-   elif ($m_lower | contains("gemini") | not) or ($m_lower | test("claude|gpt|fable|mythos|opus|sonnet|haiku|glm|ark")) then
-     (.quota["3p-weekly"] // .quota["gemini-weekly"] // {})
-   else
-     (.quota["gemini-weekly"] // .quota["3p-weekly"] // {})
-   end) as $qw |
+  resolve_quota($q_entries; $m_lower; "5h") as $q5 |
+  resolve_quota($q_entries; $m_lower; "weekly") as $qw |
   "agent_state=" + ($st | @sh) + "\n" +
   "cwd=" + ((.cwd // .workspace.current_dir // "") | @sh) + "\n" +
   "branch=" + ((.vcs.branch // .workspace.branch // "") | @sh) + "\n" +
