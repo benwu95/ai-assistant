@@ -49,13 +49,13 @@ function Resolve-RepoRoot {
     $dest = if ($env:AI_ASSISTANT_DIR) { $env:AI_ASSISTANT_DIR } else { $AiHome }
     if (Test-Path -LiteralPath (Join-Path $dest '.git')) {
         Write-Host "Updating existing clone at $dest"
-        git -C $dest pull --ff-only
+        git -C $dest pull --ff-only | Out-Host
     }
     else {
         Write-Host "Cloning $RepoUrl -> $dest"
         $parent = Split-Path -Parent $dest
         if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        git clone $RepoUrl $dest
+        git clone $RepoUrl $dest | Out-Host
     }
     return $dest
 }
