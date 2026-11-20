@@ -16,10 +16,6 @@ remaining_fraction=""
 reset_in_seconds=""
 weekly_remaining_fraction=""
 weekly_reset_in_seconds=""
-rate_limits_used=""
-rate_limits_reset=""
-rate_limits_weekly_used=""
-rate_limits_weekly_reset=""
 used_pct=""
 cli_version=""
 cycle_mode="default"
@@ -49,7 +45,7 @@ parse_payload() {
     end;
   def resolve_quota($entries; $m_lower; $win):
     (g4_variant($m_lower)) as $v |
-    if ($m_lower | test("(^|[^a-z])(claude|gpt|fable|mythos|opus|sonnet|haiku|glm|ark)([^a-z]|$)")) then
+    if ($m_lower | test("(^|[^a-z])(claude|gpt|opus|sonnet)([^a-z]|$)")) then
       (.quota["3p-" + $win] // .quota["gemini-" + $win] // {})
     elif $v != null then
       (find_bucket($entries; $v; "5h")) as $v5 |
@@ -88,10 +84,6 @@ parse_payload() {
   "reset_in_seconds=" + (($q5.reset_in_seconds // $q5.resetInSeconds // $q5.resets_at // $q5.reset_time // $q5.resetTime // "") | tostring | @sh) + "\n" +
   "weekly_remaining_fraction=" + (($qw.remaining_fraction // $qw.remainingFraction // "") | tostring | @sh) + "\n" +
   "weekly_reset_in_seconds=" + (($qw.reset_in_seconds // $qw.resetInSeconds // $qw.resets_at // $qw.reset_time // $qw.resetTime // "") | tostring | @sh) + "\n" +
-  "rate_limits_used=" + ((.rate_limits.five_hour.used_percentage // "") | tostring | @sh) + "\n" +
-  "rate_limits_reset=" + ((.rate_limits.five_hour.resets_at // "") | tostring | @sh) + "\n" +
-  "rate_limits_weekly_used=" + ((.rate_limits.seven_day.used_percentage // "") | tostring | @sh) + "\n" +
-  "rate_limits_weekly_reset=" + ((.rate_limits.seven_day.resets_at // "") | tostring | @sh) + "\n" +
   "used_pct=" + ((.context_window.used_percentage // .context_window.current_usage.used_percentage // .used_percentage // "") | tostring | @sh) + "\n" +
   "cli_version=" + ((.version // "") | tostring | @sh) + "\n" +
   "cycle_mode=" + ((.cycle_mode // .agent_mode // .mode // "default") | tostring | @sh)
@@ -207,7 +199,7 @@ case "$color_scheme" in
     ;;
 esac
 
-# Quota & Rate Limit Formatting
+# Quota Formatting
 usage_fmt=""
 if { [ -n "$remaining_fraction" ] && [ "$remaining_fraction" != "null" ]; } || { [ -n "$weekly_remaining_fraction" ] && [ "$weekly_remaining_fraction" != "null" ]; }; then
   if [ -n "$remaining_fraction" ] && [ "$remaining_fraction" != "null" ]; then
@@ -222,29 +214,6 @@ if { [ -n "$remaining_fraction" ] && [ "$remaining_fraction" != "null" ]; } || {
   if [ -n "$weekly_remaining_fraction" ] && [ "$weekly_remaining_fraction" != "null" ]; then
     weekly_used_val=$(awk -v r="$weekly_remaining_fraction" 'BEGIN { printf "%.1f%%", (1 - r) * 100 }' 2>/dev/null || echo "0.0%")
     weekly_reset_fmt=$(format_reset_time "$weekly_reset_in_seconds" "true")
-    weekly_part="${COLOR_LABEL}7d: ${COLOR_RESET}${COLOR_USAGE}${weekly_used_val}${COLOR_RESET}"
-    if [ -n "$weekly_reset_fmt" ]; then
-      weekly_part="${weekly_part} ${COLOR_LABEL}(${weekly_reset_fmt})${COLOR_RESET}"
-    fi
-    if [ -n "$usage_fmt" ]; then
-      usage_fmt="${usage_fmt} ${COLOR_LABEL}· ${COLOR_RESET}${weekly_part}"
-    else
-      usage_fmt="$weekly_part"
-    fi
-  fi
-elif { [ -n "$rate_limits_used" ] && [ "$rate_limits_used" != "null" ]; } || { [ -n "$rate_limits_weekly_used" ] && [ "$rate_limits_weekly_used" != "null" ]; }; then
-  if [ -n "$rate_limits_used" ] && [ "$rate_limits_used" != "null" ]; then
-    used_val=$(awk -v p="$rate_limits_used" 'BEGIN { printf "%.1f%%", p }' 2>/dev/null || echo "${rate_limits_used}%")
-    reset_fmt=$(format_reset_time "$rate_limits_reset")
-    usage_fmt="${COLOR_LABEL}5h: ${COLOR_RESET}${COLOR_USAGE}${used_val}${COLOR_RESET}"
-    if [ -n "$reset_fmt" ]; then
-      usage_fmt="${usage_fmt} ${COLOR_LABEL}(${reset_fmt})${COLOR_RESET}"
-    fi
-  fi
-
-  if [ -n "$rate_limits_weekly_used" ] && [ "$rate_limits_weekly_used" != "null" ]; then
-    weekly_used_val=$(awk -v p="$rate_limits_weekly_used" 'BEGIN { printf "%.1f%%", p }' 2>/dev/null || echo "${rate_limits_weekly_used}%")
-    weekly_reset_fmt=$(format_reset_time "$rate_limits_weekly_reset" "true")
     weekly_part="${COLOR_LABEL}7d: ${COLOR_RESET}${COLOR_USAGE}${weekly_used_val}${COLOR_RESET}"
     if [ -n "$weekly_reset_fmt" ]; then
       weekly_part="${weekly_part} ${COLOR_LABEL}(${weekly_reset_fmt})${COLOR_RESET}"
