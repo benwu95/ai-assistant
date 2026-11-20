@@ -26,35 +26,42 @@ cycle_mode="default"
 
 parse_payload() {
   jq -r '
-  def find_bucket($entries; $pat; $win):
-    [ $entries[] | select((.key | ascii_downcase | test($pat)) and (.key | ascii_downcase | contains($win))) | .value ][0];
+  def find_bucket($entries; $v; $win):
+    [ $entries[] | select((.key | ascii_downcase | test("(^|[^a-z])" + $v + "([^a-z]|$)")) and (.key | ascii_downcase | contains($win))) | .value ][0];
   def find_generic_g4($entries; $win):
-    [ $entries[] | select((.key | ascii_downcase | test("gemini-?4")) and (.key | ascii_downcase | test("argon|hydrogen|carbon") | not) and (.key | ascii_downcase | contains($win))) | .value ][0];
+    [ $entries[] | select(.key | ascii_downcase | test("(^|[-_])gemini-?4([-_](wtu|quota|pool))?[-_]" + $win + "($|[-_])")) | .value ][0];
+  def pick_window($b5; $bw; $win):
+    if $win == "5h" then ($b5 // {}) else ($bw // {}) end;
+  def g4_variant($m_lower):
+    [
+      (try ($m_lower | capture("(^|[^a-z])(?<v>neon|hydrogen|carbon|argon)([^a-z]|$)").v) catch empty),
+      (try ($m_lower | capture("orchestrator[[:space:]]*\\((?<v>[a-z]{2,})\\)").v) catch empty),
+      (try ($m_lower | capture("gemini[- ]?4[- ]+(?<v>[a-z]{2,})([^a-z0-9]|$)").v) catch empty),
+      (try ($m_lower | capture("orchestrator-(?<v>[a-z]{2,})([^a-z0-9]|$)").v) catch empty)
+    ] | map(select(test("^(low|medium|high|xhigh|max|default|auto|pro|flash|ultra|preview|thinking)$") | not)) | .[0];
+  def resolve_gemini4_or_shared($entries; $win):
+    (find_generic_g4($entries; "5h")) as $g5 |
+    (find_generic_g4($entries; "weekly")) as $gw |
+    if ($g5 != null or $gw != null) then
+      pick_window($g5; $gw; $win)
+    else
+      (.quota["gemini-" + $win] // .quota["3p-" + $win] // {})
+    end;
   def resolve_quota($entries; $m_lower; $win):
-    if ($m_lower | test("hydrogen|carbon|argon")) then
-      (($m_lower | capture("(?<v>hydrogen|carbon|argon)").v)) as $v |
+    (g4_variant($m_lower)) as $v |
+    if ($m_lower | test("(^|[^a-z])(claude|gpt|fable|mythos|opus|sonnet|haiku|glm|ark)([^a-z]|$)")) then
+      (.quota["3p-" + $win] // .quota["gemini-" + $win] // {})
+    elif $v != null then
       (find_bucket($entries; $v; "5h")) as $v5 |
       (find_bucket($entries; $v; "weekly")) as $vw |
       if ($v5 != null or $vw != null) then
-        (if $win == "5h" then ($v5 // {}) else ($vw // {}) end)
+        pick_window($v5; $vw; $win)
       else
-        (find_generic_g4($entries; "5h")) as $g5 |
-        (find_generic_g4($entries; "weekly")) as $gw |
-        if ($g5 != null or $gw != null) then
-          (if $win == "5h" then ($g5 // {}) else ($gw // {}) end)
-        else
-          (.quota["gemini-" + $win] // .quota["3p-" + $win] // {})
-        end
+        resolve_gemini4_or_shared($entries; $win)
       end
-    elif ($m_lower | test("gemini[- ]?4")) then
-      (find_generic_g4($entries; "5h")) as $g5 |
-      (find_generic_g4($entries; "weekly")) as $gw |
-      if ($g5 != null or $gw != null) then
-        (if $win == "5h" then ($g5 // {}) else ($gw // {}) end)
-      else
-        (.quota["gemini-" + $win] // .quota["3p-" + $win] // {})
-      end
-    elif ($m_lower | contains("gemini") | not) or ($m_lower | test("claude|gpt|fable|mythos|opus|sonnet|haiku|glm|ark")) then
+    elif ($m_lower | test("gemini[- ]?4|(^|[^a-z])orchestrator([^a-z]|$)")) then
+      resolve_gemini4_or_shared($entries; $win)
+    elif ($m_lower | contains("gemini") | not) then
       (.quota["3p-" + $win] // .quota["gemini-" + $win] // {})
     else
       (.quota["gemini-" + $win] // .quota["3p-" + $win] // {})
