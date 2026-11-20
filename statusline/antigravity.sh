@@ -390,26 +390,7 @@ if [ -n "$cwd_fmt" ]; then
 fi
 
 if [ "$is_git" = "true" ]; then
-  base_branch="main"
-  if ! git_cmd -C "$cwd" show-ref --verify --quiet refs/heads/main 2>/dev/null; then
-    if git_cmd -C "$cwd" show-ref --verify --quiet refs/heads/master 2>/dev/null; then
-      base_branch="master"
-    fi
-  fi
-
-  current_branch=$(git_cmd -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
-  if [ "$current_branch" = "$base_branch" ] || [ -z "$current_branch" ]; then
-    diff_target="HEAD"
-  else
-    merge_base=$(git_cmd -C "$cwd" merge-base "$base_branch" HEAD 2>/dev/null)
-    if [ -n "$merge_base" ]; then
-      diff_target="$merge_base"
-    else
-      diff_target="$base_branch"
-    fi
-  fi
-
-  git_stat=$(git_cmd -C "$cwd" diff "$diff_target" --raw --numstat 2>/dev/null | awk '
+  git_stat=$(git_cmd -C "$cwd" diff HEAD --raw --numstat 2>/dev/null | awk '
     BEGIN { mod=0; add=0; del=0; ren=0; add_lines=0; del_lines=0 }
     /^:[0-9]{6}/ {
       status = substr($5, 1, 1)
