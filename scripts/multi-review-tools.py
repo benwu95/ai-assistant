@@ -50,7 +50,7 @@ ISSUE_SECTIONS = (
     "Maintainability & Architecture",
 )
 
-SECTIONS_TO_REGENERATE = ("Verification Summary",)
+SECTIONS_TO_REGENERATE = ("Verification Summary", "Per-round breakdown")
 
 CANONICAL_ORDER = (
     "Summary",
@@ -71,7 +71,7 @@ VERDICT_RE = re.compile(r'^\[(' + '|'.join((*ALL_VERDICTS, *LEGACY_VERDICT_MAP))
 EVIDENCE_RE = re.compile(r'^Evidence:')
 TITLE_BULLET_RE = re.compile(r'^(- \*\*[^*]+\*\*)(.*)$')
 TITLE_H3_RE = re.compile(r'^### .+$')
-PATH_LINE_RE = re.compile(r'[A-Za-z0-9_./\-]+:\d+')
+ORIGIN_RE = re.compile(r'\s*_\(origin: iter-\d+\)_')
 
 
 # === Shared parsing primitives ==============================================
@@ -180,6 +180,13 @@ def splice_verdict_in_block(block, verdict, evidence):
     if not cleaned:
         return [f"[{verdict}]", evidence]
     return [cleaned[0], f"[{verdict}]", evidence] + cleaned[1:]
+
+
+def issue_title(block):
+    """Title line without its `_(origin: iter-N)_` annotation."""
+    if not block:
+        return None
+    return ORIGIN_RE.sub('', block[0]).strip()
 
 
 def annotate_origin(block, iter_n):
@@ -292,25 +299,42 @@ class MergeState:
         if verdict in round_counts:
             round_counts[verdict] += 1
 
+        # iter-0 is the carry-forward anchor (copy of prior review.md). Its
+        # blocks already carry an `_(origin: iter-N)_` annotation from the
+        # prior run's merge — don't double-stamp.
+        block_with_origin = block if n == 0 else annotate_origin(block, n)
+
         if loc not in self.location_index:
-            idx = len(self.issues_by_section[section_name])
-            # iter-0 is the carry-forward anchor (copy of prior review.md). Its
-            # blocks already carry an `_(origin: iter-N)_` annotation from the
-            # prior run's merge — don't double-stamp.
-            block_with_origin = block if n == 0 else annotate_origin(block, n)
-            self.issues_by_section[section_name].append({
-                'loc': loc,
-                'block': block_with_origin,
-                'verdict': verdict,
-            })
-            self.location_index[loc] = (section_name, idx)
+            self._add_entry(section_name, loc, block_with_origin, verdict)
             return
 
+        if not (verdict and evidence):
+            return
         sec, idx = self.location_index[loc]
         entry = self.issues_by_section[sec][idx]
-        if verdict and evidence:
-            entry['block'] = splice_verdict_in_block(entry['block'], verdict, evidence)
-            entry['verdict'] = verdict
+        if issue_title(block) != issue_title(entry['block']):
+            # Location is the join key for every verdict file, so a different
+            # issue at the same Location supersedes the older one; splicing the
+            # new verdict into the old block would pair it with the wrong text.
+            sys.stderr.write(
+                f"merge: iter-{n} issue at {loc} supersedes {issue_title(entry['block'])!r}\n"
+            )
+            self.issues_by_section[sec][idx] = None
+            self._add_entry(section_name, loc, block_with_origin, verdict)
+            return
+        entry['block'] = splice_verdict_in_block(entry['block'], verdict, evidence)
+        entry['verdict'] = verdict
+
+    def _add_entry(self, section_name, loc, block, verdict):
+        self.location_index[loc] = (section_name, len(self.issues_by_section[section_name]))
+        self.issues_by_section[section_name].append({
+            'loc': loc,
+            'block': block,
+            'verdict': verdict,
+        })
+
+    def live_entries(self, section_name):
+        return [e for e in self.issues_by_section.get(section_name, []) if e is not None]
 
     def ordered_sections(self):
         canonical = [s for s in CANONICAL_ORDER if s in self.section_order]
@@ -328,7 +352,7 @@ class MergeState:
             out.append(f"## {section_name}")
             out.append("")
             if section_name in ISSUE_SECTIONS:
-                for entry in self.issues_by_section.get(section_name, []):
+                for entry in self.live_entries(section_name):
                     block = entry['block']
                     while block and block[-1].strip() == "":
                         block = block[:-1]
@@ -344,8 +368,8 @@ class MergeState:
                 out.append("")
 
         final_counts = dict.fromkeys(ALL_VERDICTS, 0)
-        for entries in self.issues_by_section.values():
-            for entry in entries:
+        for section_name in self.issues_by_section:
+            for entry in self.live_entries(section_name):
                 v = entry.get('verdict')
                 if v in final_counts:
                     final_counts[v] += 1
@@ -455,22 +479,21 @@ def cmd_extract_annotations(args):
     """Parse [verdict]/Evidence pairs from a verified.md into sorted 3-col TSV.
 
     Output columns: <path:line> <TAB> <verdict> <TAB> <full Evidence line>
+    The key is each issue block's Location, matching splice/reannotate/merge.
     """
     p = Path(args.path)
     if not p.exists():
         return
+    _, _, sections = parse_file(p)
     records = []
-    current_verdict = None
-    for line in p.read_text().splitlines():
-        vm = VERDICT_RE.match(line)
-        if vm:
-            current_verdict = normalize_verdict(vm.group(1))
-            continue
-        if current_verdict and EVIDENCE_RE.match(line):
-            m = PATH_LINE_RE.search(line)
-            key = m.group(0) if m else line
-            records.append((key, current_verdict, line))
-            current_verdict = None
+    for section_name in ISSUE_SECTIONS:
+        for kind, block in split_blocks(sections.get(section_name, [])):
+            if kind != 'issue':
+                continue
+            loc = extract_location(block)
+            verdict, evidence = extract_verdict_evidence(block)
+            if loc and verdict and evidence:
+                records.append((loc, verdict, evidence))
     emit_sorted_unique_tsv(records)
 
 
@@ -482,7 +505,7 @@ def cmd_parse_verifier_raw(args):
         Location: path:line
         Evidence: path:line — ...
 
-    Location anchors the key (preferred); falls back to path in Evidence.
+    The Location line is the key; records without one are dropped.
     """
     p = Path(args.path)
     if not p.exists():

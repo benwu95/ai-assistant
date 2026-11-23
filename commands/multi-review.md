@@ -360,7 +360,7 @@ python3 ~/.ai-assistant/scripts/multi-review-tools.py summary-table "<STATS_TSV>
 2. **Read the final report** [Read]: open `<FINAL_REPORT>`
 
 3. **Report the results**:
-   - The file is **cumulative**: each issue appears once (deduped by Location), with the verdict taken from the last round that judged it; the block content comes from the round where the issue first appeared (tagged `_(origin: iter-N)_`). Earlier rounds' `[IGNORABLE]` / `[NONEXISTENT]` items are preserved in the final report even when later rounds' reviewers skipped them
+   - The file is **cumulative**: each issue appears once (deduped by Location), with the verdict taken from the last round that judged it; the block content comes from the round where the issue first appeared (tagged `_(origin: iter-N)_`), unless a later round reports a different issue (different title) at the same Location, which then replaces it. Earlier rounds' `[IGNORABLE]` / `[NONEXISTENT]` items are preserved in the final report even when later rounds' reviewers skipped them
    - List every `[NEEDS-FIX]` item's **title + Location** (one per line), ordered `## Critical Issues` (P0) → `## Performance & Optimization` (P1) → `## Maintainability & Architecture` (P2); the section itself carries the severity semantics
    - Group by file which files need changes
    - Attach the per-round breakdown table (output of Step 11.1)
