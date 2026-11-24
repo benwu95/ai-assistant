@@ -10,64 +10,76 @@ sandbox_val="false"
 tokens_in="0"
 tokens_out="0"
 tokens_cached="0"
-tokens_thinking="0"
 credits_rem=""
+quota_mode="single"
 remaining_fraction=""
 reset_in_seconds=""
 weekly_remaining_fraction=""
 weekly_reset_in_seconds=""
+tp_remaining_fraction=""
+tp_reset_in_seconds=""
+tp_weekly_remaining_fraction=""
+tp_weekly_reset_in_seconds=""
 used_pct=""
 cli_version=""
 cycle_mode="default"
+color_scheme="default"
+orch_planner=""
+orch_executor=""
+
+settings_file="${ANTIGRAVITY_SETTINGS_FILE:-$HOME/.gemini/antigravity-cli/settings.json}"
+if [ -f "$settings_file" ]; then
+  eval "$(jq -r '
+    "color_scheme=" + ((.colorScheme // "default") | tostring | @sh) + "\n" +
+    "orch_planner=" + ((.orchestrator.planner // "") | tostring | @sh) + "\n" +
+    "orch_executor=" + ((.orchestrator.executor // "") | tostring | @sh)
+  ' "$settings_file" 2>/dev/null)"
+fi
 
 parse_payload() {
-  jq -r '
-  def find_bucket($entries; $v; $win):
-    [ $entries[] | select((.key | ascii_downcase | test("(^|[^a-z])" + $v + "([^a-z]|$)")) and (.key | ascii_downcase | contains($win))) | .value ][0];
-  def find_generic_g4($entries; $win):
-    [ $entries[] | select(.key | ascii_downcase | test("(^|[-_])gemini-?4([-_](wtu|quota|pool))?[-_]" + $win + "($|[-_])")) | .value ][0];
-  def pick_window($b5; $bw; $win):
-    if $win == "5h" then ($b5 // {}) else ($bw // {}) end;
-  def g4_variant($m_lower):
-    [
-      (try ($m_lower | capture("(^|[^a-z])(?<v>neon|hydrogen|carbon|argon)([^a-z]|$)").v) catch empty),
-      (try ($m_lower | capture("orchestrator[[:space:]]*\\((?<v>[a-z]{2,})\\)").v) catch empty),
-      (try ($m_lower | capture("gemini[- ]?4[- ]+(?<v>[a-z]{2,})([^a-z0-9]|$)").v) catch empty),
-      (try ($m_lower | capture("orchestrator-(?<v>[a-z]{2,})([^a-z0-9]|$)").v) catch empty)
-    ] | map(select(test("^(low|medium|high|xhigh|max|default|auto|pro|flash|ultra|preview|thinking)$") | not)) | .[0];
-  def resolve_gemini4_or_shared($entries; $win):
-    (find_generic_g4($entries; "5h")) as $g5 |
-    (find_generic_g4($entries; "weekly")) as $gw |
-    if ($g5 != null or $gw != null) then
-      pick_window($g5; $gw; $win)
-    else
-      (.quota["gemini-" + $win] // .quota["3p-" + $win] // {})
+  jq -r --arg orch_planner "$orch_planner" --arg orch_executor "$orch_executor" '
+  def pool_for_model($s):
+    (($s // "") | ascii_downcase) as $l |
+    if ($l | test("^[[:space:]]*$")) then null
+    elif ($l | test("(^|[^a-z])(claude|gpt|opus|sonnet|oss)([^a-z]|$)")) then "3p"
+    elif ($l | test("(^|[^a-z])(gemini|neon|carbon|argon|hydrogen)([^a-z]|$)")) then "gemini"
+    else "3p"
     end;
-  def resolve_quota($entries; $m_lower; $win):
-    (g4_variant($m_lower)) as $v |
-    if ($m_lower | test("(^|[^a-z])(claude|gpt|opus|sonnet)([^a-z]|$)")) then
-      (.quota["3p-" + $win] // .quota["gemini-" + $win] // {})
-    elif $v != null then
-      (find_bucket($entries; $v; "5h")) as $v5 |
-      (find_bucket($entries; $v; "weekly")) as $vw |
-      if ($v5 != null or $vw != null) then
-        pick_window($v5; $vw; $win)
-      else
-        resolve_gemini4_or_shared($entries; $win)
+  def orchestrator_fallback_pool($id; $name):
+    ($name | ascii_downcase) as $n_lower |
+    (try ($n_lower | capture("orchestrator[[:space:]]*\\((?<inner>[^)]+)\\)").inner) catch null) as $inner |
+    if $inner != null then
+      pool_for_model($inner)
+    else
+      pool_for_model($id + " " + $name)
+    end;
+  def resolve_pools($id; $name; $planner; $executor):
+    if (($id + " " + $name) | ascii_downcase | test("(^|[^a-z])orchestrator([^a-z]|$)")) then
+      ([$planner, $executor] | map(pool_for_model(.)) | map(select(. != null)) | unique) as $cfg |
+      if ($cfg | length) > 0 then $cfg
+      else [orchestrator_fallback_pool($id; $name) // "gemini"]
       end
-    elif ($m_lower | test("gemini[- ]?4|(^|[^a-z])orchestrator([^a-z]|$)")) then
-      resolve_gemini4_or_shared($entries; $win)
-    elif ($m_lower | contains("gemini") | not) then
+    else
+      [pool_for_model($id + " " + $name) // "gemini"]
+    end;
+  def get_single_pool($pool; $win):
+    if $pool == "3p" then
       (.quota["3p-" + $win] // .quota["gemini-" + $win] // {})
     else
       (.quota["gemini-" + $win] // .quota["3p-" + $win] // {})
     end;
   ((.agent_state // .state // "idle")) as $st |
-  ((.model.display_name // .model.id // "")) as $m |
-  (((.model.id // "") + " " + (.model.display_name // "")) | ascii_downcase) as $m_lower |
-  ((.quota // {}) | to_entries) as $q_entries |
-  resolve_quota($q_entries; $m_lower; "5h") as $q5 |
-  resolve_quota($q_entries; $m_lower; "weekly") as $qw |
+  (.model.id // "") as $m_id |
+  (.model.display_name // "") as $m_name |
+  ($m_name | if . == "" then $m_id else . end) as $m |
+  (.orchestrator.planner // $orch_planner // "") as $eff_planner |
+  (.orchestrator.executor // $orch_executor // "") as $eff_executor |
+  resolve_pools($m_id; $m_name; $eff_planner; $eff_executor) as $pools |
+  (($pools | index("gemini") != null) and ($pools | index("3p") != null)) as $is_dual |
+  (if $is_dual then (.quota["gemini-5h"] // {}) else get_single_pool(($pools[0] // "gemini"); "5h") end) as $q5 |
+  (if $is_dual then (.quota["gemini-weekly"] // {}) else get_single_pool(($pools[0] // "gemini"); "weekly") end) as $qw |
+  (if $is_dual then (.quota["3p-5h"] // {}) else {} end) as $tp5 |
+  (if $is_dual then (.quota["3p-weekly"] // {}) else {} end) as $tpw |
   "agent_state=" + ($st | @sh) + "\n" +
   "cwd=" + ((.cwd // .workspace.current_dir // "") | @sh) + "\n" +
   "branch=" + ((.vcs.branch // .workspace.branch // "") | @sh) + "\n" +
@@ -78,12 +90,16 @@ parse_payload() {
   "tokens_in=" + ((.context_window.current_usage.input_tokens // .context_window.total_input_tokens // .tokens.input // .tokens_in // .usage.input_tokens // 0) | tostring | @sh) + "\n" +
   "tokens_out=" + ((.context_window.current_usage.output_tokens // .context_window.total_output_tokens // .tokens.output // .tokens_out // .usage.output_tokens // 0) | tostring | @sh) + "\n" +
   "tokens_cached=" + ((.tokens.cached // .tokens.cache_read // .context_window.current_usage.cache_read_input_tokens // .context_window.cache_read_input_tokens // .tokens.cached_content // 0) | tostring | @sh) + "\n" +
-  "tokens_thinking=" + ((.tokens.thinking // .tokens.reasoning // .context_window.current_usage.thinking_output_tokens // .context_window.thinking_output_tokens // 0) | tostring | @sh) + "\n" +
   "credits_rem=" + ((.credits.remaining // .credits // .cost.total_cost_usd // "") | tostring | @sh) + "\n" +
+  "quota_mode=" + ((if $is_dual then "dual" else "single" end) | @sh) + "\n" +
   "remaining_fraction=" + (($q5.remaining_fraction // $q5.remainingFraction // "") | tostring | @sh) + "\n" +
   "reset_in_seconds=" + (($q5.reset_in_seconds // $q5.resetInSeconds // $q5.resets_at // $q5.reset_time // $q5.resetTime // "") | tostring | @sh) + "\n" +
   "weekly_remaining_fraction=" + (($qw.remaining_fraction // $qw.remainingFraction // "") | tostring | @sh) + "\n" +
   "weekly_reset_in_seconds=" + (($qw.reset_in_seconds // $qw.resetInSeconds // $qw.resets_at // $qw.reset_time // $qw.resetTime // "") | tostring | @sh) + "\n" +
+  "tp_remaining_fraction=" + (($tp5.remaining_fraction // $tp5.remainingFraction // "") | tostring | @sh) + "\n" +
+  "tp_reset_in_seconds=" + (($tp5.reset_in_seconds // $tp5.resetInSeconds // $tp5.resets_at // $tp5.reset_time // $tp5.resetTime // "") | tostring | @sh) + "\n" +
+  "tp_weekly_remaining_fraction=" + (($tpw.remaining_fraction // $tpw.remainingFraction // "") | tostring | @sh) + "\n" +
+  "tp_weekly_reset_in_seconds=" + (($tpw.reset_in_seconds // $tpw.resetInSeconds // $tpw.resets_at // $tpw.reset_time // $tpw.resetTime // "") | tostring | @sh) + "\n" +
   "used_pct=" + ((.context_window.used_percentage // .context_window.current_usage.used_percentage // .used_percentage // "") | tostring | @sh) + "\n" +
   "cli_version=" + ((.version // "") | tostring | @sh) + "\n" +
   "cycle_mode=" + ((.cycle_mode // .agent_mode // .mode // "default") | tostring | @sh)
@@ -155,14 +171,7 @@ format_reset_time() {
   fi
 }
 
-# Theme definitions & color scheme extraction
-color_scheme="default"
-if [ -f "$HOME/.gemini/antigravity-cli/settings.json" ]; then
-  cs_line=$(grep '"colorScheme"' "$HOME/.gemini/antigravity-cli/settings.json" 2>/dev/null)
-  if [ -n "$cs_line" ]; then
-    color_scheme=$(echo "$cs_line" | sed -n 's/.*"colorScheme":[[:space:]]*"\([^"]*\)".*/\1/p')
-  fi
-fi
+# Theme definitions
 
 COLOR_MODEL="\033[1;36m"    # Bold Cyan
 COLOR_USAGE="\033[1;33m"    # Bold Yellow
@@ -199,33 +208,59 @@ case "$color_scheme" in
     ;;
 esac
 
-# Quota Formatting
-usage_fmt=""
-if { [ -n "$remaining_fraction" ] && [ "$remaining_fraction" != "null" ]; } || { [ -n "$weekly_remaining_fraction" ] && [ "$weekly_remaining_fraction" != "null" ]; }; then
-  if [ -n "$remaining_fraction" ] && [ "$remaining_fraction" != "null" ]; then
-    used_val=$(awk -v r="$remaining_fraction" 'BEGIN { printf "%.1f%%", (1 - r) * 100 }' 2>/dev/null || echo "0.0%")
-    reset_fmt=$(format_reset_time "$reset_in_seconds")
-    usage_fmt="${COLOR_LABEL}5h: ${COLOR_RESET}${COLOR_USAGE}${used_val}${COLOR_RESET}"
+format_quota_pool() {
+  local prefix=$1
+  local rem=$2
+  local reset=$3
+  local w_rem=$4
+  local w_reset=$5
+  local out=""
+  local used_val reset_fmt weekly_used_val weekly_reset_fmt weekly_part
+
+  if [ -n "$rem" ] && [ "$rem" != "null" ]; then
+    used_val=$(awk -v r="$rem" 'BEGIN { printf "%.1f%%", (1 - r) * 100 }' 2>/dev/null || echo "0.0%")
+    reset_fmt=$(format_reset_time "$reset")
+    out="${COLOR_LABEL}${prefix}5h: ${COLOR_RESET}${COLOR_USAGE}${used_val}${COLOR_RESET}"
     if [ -n "$reset_fmt" ]; then
-      usage_fmt="${usage_fmt} ${COLOR_LABEL}(${reset_fmt})${COLOR_RESET}"
+      out="${out} ${COLOR_LABEL}(${reset_fmt})${COLOR_RESET}"
     fi
   fi
 
-  if [ -n "$weekly_remaining_fraction" ] && [ "$weekly_remaining_fraction" != "null" ]; then
-    weekly_used_val=$(awk -v r="$weekly_remaining_fraction" 'BEGIN { printf "%.1f%%", (1 - r) * 100 }' 2>/dev/null || echo "0.0%")
-    weekly_reset_fmt=$(format_reset_time "$weekly_reset_in_seconds" "true")
-    weekly_part="${COLOR_LABEL}7d: ${COLOR_RESET}${COLOR_USAGE}${weekly_used_val}${COLOR_RESET}"
+  if [ -n "$w_rem" ] && [ "$w_rem" != "null" ]; then
+    weekly_used_val=$(awk -v r="$w_rem" 'BEGIN { printf "%.1f%%", (1 - r) * 100 }' 2>/dev/null || echo "0.0%")
+    weekly_reset_fmt=$(format_reset_time "$w_reset" "true")
+    if [ -n "$out" ]; then
+      weekly_part="${COLOR_LABEL}7d: ${COLOR_RESET}${COLOR_USAGE}${weekly_used_val}${COLOR_RESET}"
+    else
+      weekly_part="${COLOR_LABEL}${prefix}7d: ${COLOR_RESET}${COLOR_USAGE}${weekly_used_val}${COLOR_RESET}"
+    fi
     if [ -n "$weekly_reset_fmt" ]; then
       weekly_part="${weekly_part} ${COLOR_LABEL}(${weekly_reset_fmt})${COLOR_RESET}"
     fi
-    if [ -n "$usage_fmt" ]; then
-      usage_fmt="${usage_fmt} ${COLOR_LABEL}· ${COLOR_RESET}${weekly_part}"
+    if [ -n "$out" ]; then
+      out="${out} ${COLOR_LABEL}· ${COLOR_RESET}${weekly_part}"
     else
-      usage_fmt="$weekly_part"
+      out="$weekly_part"
     fi
   fi
+
+  echo "$out"
+}
+
+# Quota Formatting
+usage_segments=()
+if [ "$quota_mode" = "dual" ]; then
+  g_fmt=$(format_quota_pool "G " "$remaining_fraction" "$reset_in_seconds" "$weekly_remaining_fraction" "$weekly_reset_in_seconds")
+  tp_fmt=$(format_quota_pool "3P " "$tp_remaining_fraction" "$tp_reset_in_seconds" "$tp_weekly_remaining_fraction" "$tp_weekly_reset_in_seconds")
+  [ -n "$g_fmt" ] && usage_segments+=("$g_fmt")
+  [ -n "$tp_fmt" ] && usage_segments+=("$tp_fmt")
 else
-  usage_fmt="${COLOR_LABEL}5h: ${COLOR_RESET}${COLOR_USAGE}--${COLOR_RESET}"
+  single_fmt=$(format_quota_pool "" "$remaining_fraction" "$reset_in_seconds" "$weekly_remaining_fraction" "$weekly_reset_in_seconds")
+  [ -n "$single_fmt" ] && usage_segments+=("$single_fmt")
+fi
+
+if [ "${#usage_segments[@]}" -eq 0 ]; then
+  usage_segments+=("${COLOR_LABEL}5h: ${COLOR_RESET}${COLOR_USAGE}--${COLOR_RESET}")
 fi
 
 context_fmt=""
@@ -335,6 +370,53 @@ if [[ "$subagents_count" =~ ^[0-9]+$ ]] && [ "$subagents_count" -gt 0 ]; then
   line1_segments+=("🤖 $subagents_count")
 fi
 
+in_fmt=$(format_number "$tokens_in")
+out_fmt=$(format_number "$tokens_out")
+cached_fmt=$(format_number "$tokens_cached")
+
+show_tokens=false
+if [[ "$tokens_in" =~ ^[0-9]+$ ]] && [[ "$tokens_out" =~ ^[0-9]+$ ]]; then
+  if [ "$tokens_in" -gt 0 ] || [ "$tokens_out" -gt 0 ]; then
+    show_tokens=true
+  fi
+fi
+
+show_context=false
+if [ -n "$context_fmt" ]; then
+  show_context=true
+fi
+
+show_credits=false
+if [ -n "$credits_rem" ] && [ "$credits_rem" != "null" ] && [ "$credits_rem" != "" ] && [ "$credits_rem" != "0" ]; then
+  show_credits=true
+fi
+
+if [ "$show_tokens" = "true" ] || [ "$show_context" = "true" ] || [ "$show_credits" = "true" ]; then
+  if [ "$show_context" = "true" ]; then
+    line1_segments+=("${COLOR_LABEL}context: ${COLOR_RESET}${COLOR_CONTEXT}${context_fmt}${COLOR_RESET}")
+  elif [ "$show_tokens" = "true" ] || [ "$show_credits" = "true" ]; then
+    line1_segments+=("${COLOR_LABEL}context: ${COLOR_RESET}${COLOR_CONTEXT}--${COLOR_RESET}")
+  fi
+
+  if [ "$show_tokens" = "true" ]; then
+    tokens_str="${COLOR_LABEL}token: ${COLOR_RESET}${COLOR_TOKENS}${in_fmt}/${out_fmt}${COLOR_RESET}"
+    if [[ "$tokens_cached" =~ ^[0-9]+$ ]] && [ "$tokens_cached" -gt 0 ]; then
+      tokens_str="${tokens_str} ${COLOR_LABEL}(cache: ${COLOR_RESET}${COLOR_TOKENS}${cached_fmt}${COLOR_LABEL})${COLOR_RESET}"
+    fi
+    line1_segments+=("$tokens_str")
+  elif [ "$show_credits" = "true" ]; then
+    line1_segments+=("${COLOR_LABEL}token: ${COLOR_RESET}${COLOR_TOKENS}--${COLOR_RESET}")
+  fi
+
+  if [ "$show_credits" = "true" ]; then
+    credits_display="$credits_rem"
+    if [[ "$credits_display" != \$* ]]; then
+      credits_display="\$${credits_display}"
+    fi
+    line1_segments+=("${COLOR_LABEL}$: ${COLOR_RESET}${COLOR_CREDITS}${credits_display}${COLOR_RESET}")
+  fi
+fi
+
 # Line 2 segments (Workspace & Git)
 line2_segments=()
 
@@ -393,74 +475,17 @@ if [ "$is_git" = "true" ]; then
   line2_segments+=("📝 \033[1;32m$lines_add\033[0m/\033[1;31m$lines_del\033[0m, $file_stat")
 fi
 
-# Line 3 segments (Model & Usage)
+# Line 3 segments (Model & Quota)
 line3_segments=()
-
-in_fmt=$(format_number "$tokens_in")
-out_fmt=$(format_number "$tokens_out")
-cached_fmt=$(format_number "$tokens_cached")
-thinking_fmt=$(format_number "$tokens_thinking")
-
-show_tokens=false
-if [[ "$tokens_in" =~ ^[0-9]+$ ]] && [[ "$tokens_out" =~ ^[0-9]+$ ]]; then
-  if [ "$tokens_in" -gt 0 ] || [ "$tokens_out" -gt 0 ]; then
-    show_tokens=true
-  fi
-fi
-
-show_context=false
-if [ -n "$context_fmt" ]; then
-  show_context=true
-fi
-
-show_credits=false
-if [ -n "$credits_rem" ] && [ "$credits_rem" != "null" ] && [ "$credits_rem" != "" ] && [ "$credits_rem" != "0" ]; then
-  show_credits=true
-fi
 
 if [ -n "$model" ] && [ "$model" != "null" ]; then
   line3_segments+=("${COLOR_MODEL}${model}${COLOR_RESET}")
 fi
 
-if [ -n "$usage_fmt" ]; then
-  line3_segments+=("$usage_fmt")
-fi
-
-if [ "$show_tokens" = "true" ] || [ "$show_context" = "true" ] || [ "$show_credits" = "true" ]; then
-  if [ "$show_context" = "true" ]; then
-    line3_segments+=("${COLOR_LABEL}context: ${COLOR_RESET}${COLOR_CONTEXT}${context_fmt}${COLOR_RESET}")
-  elif [ "$show_tokens" = "true" ] || [ "$show_credits" = "true" ]; then
-    line3_segments+=("${COLOR_LABEL}context: ${COLOR_RESET}${COLOR_CONTEXT}--${COLOR_RESET}")
-  fi
-
-  if [ "$show_tokens" = "true" ]; then
-    tokens_str="${COLOR_LABEL}token: ${COLOR_RESET}${COLOR_TOKENS}${in_fmt}/${out_fmt}${COLOR_RESET}"
-    extra_info=""
-    if [[ "$tokens_cached" =~ ^[0-9]+$ ]] && [ "$tokens_cached" -gt 0 ]; then
-      extra_info="${COLOR_LABEL}cache: ${COLOR_RESET}${COLOR_TOKENS}${cached_fmt}${COLOR_RESET}"
-    fi
-    if [[ "$tokens_thinking" =~ ^[0-9]+$ ]] && [ "$tokens_thinking" -gt 0 ]; then
-      if [ -n "$extra_info" ]; then
-        extra_info="${extra_info}${COLOR_LABEL} · thinking: ${COLOR_RESET}${COLOR_TOKENS}${thinking_fmt}${COLOR_RESET}"
-      else
-        extra_info="${COLOR_LABEL}thinking: ${COLOR_RESET}${COLOR_TOKENS}${thinking_fmt}${COLOR_RESET}"
-      fi
-    fi
-    if [ -n "$extra_info" ]; then
-      tokens_str="${tokens_str} ${COLOR_LABEL}(${COLOR_RESET}${extra_info}${COLOR_LABEL})${COLOR_RESET}"
-    fi
-    line3_segments+=("$tokens_str")
-  elif [ "$show_credits" = "true" ]; then
-    line3_segments+=("${COLOR_LABEL}token: ${COLOR_RESET}${COLOR_TOKENS}--${COLOR_RESET}")
-  fi
-
-  if [ "$show_credits" = "true" ]; then
-    credits_display="$credits_rem"
-    if [[ "$credits_display" != \$* ]]; then
-      credits_display="\$${credits_display}"
-    fi
-    line3_segments+=("${COLOR_LABEL}$: ${COLOR_RESET}${COLOR_CREDITS}${credits_display}${COLOR_RESET}")
-  fi
+if [ "${#usage_segments[@]}" -gt 0 ]; then
+  for seg in "${usage_segments[@]}"; do
+    line3_segments+=("$seg")
+  done
 fi
 
 line1_output=""
