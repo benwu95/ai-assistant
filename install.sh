@@ -109,7 +109,7 @@ link_claude() {
 link_antigravity() {
     echo "Antigravity CLI:"
     link "$AIHOME/system.md" "$HOME/.gemini/GEMINI.md"
-    link "$AIHOME/skills"    "$HOME/.gemini/antigravity-cli/skills"
+    link "$AIHOME/skills"    "$HOME/.gemini/config/skills"
 }
 
 link_codex() {

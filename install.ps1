@@ -117,7 +117,7 @@ function Link-Claude {
 function Link-Antigravity {
     Write-Host 'Antigravity CLI:'
     New-Link (Join-Path $AiHome 'system.md') (Join-Path $HOME '.gemini\GEMINI.md')
-    New-Link (Join-Path $AiHome 'skills')    (Join-Path $HOME '.gemini\antigravity-cli\skills')
+    New-Link (Join-Path $AiHome 'skills')    (Join-Path $HOME '.gemini\config\skills')
 }
 
 function Link-Codex {
